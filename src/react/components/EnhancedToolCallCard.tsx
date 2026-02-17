@@ -64,6 +64,7 @@ export function EnhancedToolCallCard({
     <div
       className="emcy-fadeInUp"
       style={{
+        width: '100%',
         maxWidth: '90%',
         borderRadius: 10,
         backgroundColor: c.bg,

@@ -35,6 +35,7 @@ export class EmcyAgent {
   private abortController: AbortController | null = null;
   private isLoading = false;
   private listeners: Map<string, Set<EventHandler<unknown>>> = new Map();
+  private mcpSessionId: string | null = null;
 
   constructor(config: EmcyAgentConfig) {
     this.config = {
@@ -384,29 +385,111 @@ export class EmcyAgent {
    * Execute a tool call via the MCP server directly from the browser.
    * The user's auth token flows browser → MCP, never through Emcy.
    */
-  private async executeTool(toolCall: SseToolCall): Promise<unknown> {
-    const mcpServerUrl = this.agentConfig?.mcpServerUrl;
-    if (!mcpServerUrl) {
-      throw new Error('MCP server URL not configured on agent');
-    }
-
-    const token = this.config.getToken ? await this.config.getToken() : undefined;
-
+  /** Build headers for MCP server requests */
+  private getMcpHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
     };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (this.mcpSessionId) {
+      headers['Mcp-Session-Id'] = this.mcpSessionId;
     }
+    return headers;
+  }
 
-    const response = await fetch(mcpServerUrl, {
+  /** Initialize the MCP session (required before tools/call) */
+  private async initMcpSession(mcpServerUrl: string): Promise<void> {
+    if (this.mcpSessionId) return;
+
+    const headers = this.getMcpHeaders();
+    const token = this.config.getToken ? await this.config.getToken() : undefined;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    // Step 1: Send initialize request
+    const initResponse = await fetch(mcpServerUrl, {
       method: 'POST',
       headers,
       credentials: this.config.useCookies ? 'include' : 'omit',
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'emcy-agent-sdk', version: '0.1.0' },
+        },
+      }),
+    });
+
+    if (!initResponse.ok) {
+      const errorText = await initResponse.text().catch(() => 'MCP init error');
+      throw new Error(`MCP initialization failed (${initResponse.status}): ${errorText}`);
+    }
+
+    // Capture session ID from response header (read before consuming body)
+    this.mcpSessionId = initResponse.headers.get('mcp-session-id');
+
+    // Consume the response body so the connection can be reused
+    await initResponse.text().catch(() => {});
+
+    // Step 2: Send initialized notification
+    const notifyHeaders = this.getMcpHeaders();
+    if (token) notifyHeaders['Authorization'] = `Bearer ${token}`;
+
+    await fetch(mcpServerUrl, {
+      method: 'POST',
+      headers: notifyHeaders,
+      credentials: this.config.useCookies ? 'include' : 'omit',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    });
+  }
+
+  /** Parse a JSON-RPC response from either JSON or SSE format */
+  private async parseMcpResponse(response: Response): Promise<Record<string, unknown>> {
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+    if (contentType.includes('text/event-stream')) {
+      const text = await response.text();
+      const lines = text.split('\n');
+      let jsonData = '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          jsonData += line.slice(6);
+        }
+      }
+      if (!jsonData) {
+        throw new Error('No data received from MCP server SSE response');
+      }
+      return JSON.parse(jsonData);
+    }
+
+    return response.json();
+  }
+
+  private async executeTool(toolCall: SseToolCall): Promise<unknown> {
+    const mcpServerUrl = this.agentConfig?.mcpServerUrl;
+    if (!mcpServerUrl) {
+      throw new Error('MCP server URL not configured on agent');
+    }
+
+    // Ensure MCP session is initialized
+    await this.initMcpSession(mcpServerUrl);
+
+    const token = this.config.getToken ? await this.config.getToken() : undefined;
+    const headers = this.getMcpHeaders();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let response = await fetch(mcpServerUrl, {
+      method: 'POST',
+      headers,
+      credentials: this.config.useCookies ? 'include' : 'omit',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
         method: 'tools/call',
         params: {
           name: toolCall.toolName,
@@ -416,12 +499,43 @@ export class EmcyAgent {
       signal: this.abortController?.signal,
     });
 
+    // If session expired (404 = session not found), reinitialize and retry once
+    if (response.status === 404 && this.mcpSessionId) {
+      this.mcpSessionId = null;
+      await this.initMcpSession(mcpServerUrl);
+      const retryHeaders = this.getMcpHeaders();
+      if (token) retryHeaders['Authorization'] = `Bearer ${token}`;
+      response = await fetch(mcpServerUrl, {
+        method: 'POST',
+        headers: retryHeaders,
+        credentials: this.config.useCookies ? 'include' : 'omit',
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: {
+            name: toolCall.toolName,
+            arguments: toolCall.arguments,
+          },
+        }),
+        signal: this.abortController?.signal,
+      });
+    }
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'MCP server error');
       throw new Error(`Tool execution failed (${response.status}): ${errorText}`);
     }
 
-    const result = await response.json();
+    const result = await this.parseMcpResponse(response) as {
+      result?: { content?: Array<{ type: string; text: string }> };
+      error?: { code: number; message: string };
+    };
+
+    // Check for JSON-RPC error
+    if (result.error) {
+      throw new Error(`MCP error (${result.error.code}): ${result.error.message}`);
+    }
 
     if (result.result?.content) {
       const textContent = result.result.content

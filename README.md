@@ -31,7 +31,7 @@ You need an API key and agent ID from the [Emcy dashboard](https://emcy.ai).
 ### React
 
 ```tsx
-import { EmcyChat } from '@emcy/agent-sdk/react';
+import { EmcyChat } from "@emcy/agent-sdk/react";
 
 function App() {
   return (
@@ -49,36 +49,36 @@ function App() {
 ### Vanilla JS / TypeScript
 
 ```ts
-import { EmcyAgent } from '@emcy/agent-sdk';
+import { EmcyAgent } from "@emcy/agent-sdk";
 
 const agent = new EmcyAgent({
-  apiKey: 'emcy_sk_xxxx',
-  agentId: 'agent_xxxxx',
+  apiKey: "emcy_sk_xxxx",
+  agentId: "agent_xxxxx",
   getToken: async () => getAuthToken(),
 });
 
 await agent.init();
 
-agent.on('message', (msg) => console.log(msg));
-agent.on('content_delta', (delta) => console.log(delta.text));
-agent.on('error', (err) => console.error(err));
+agent.on("message", (msg) => console.log(msg));
+agent.on("content_delta", (delta) => console.log(delta.text));
+agent.on("error", (err) => console.error(err));
 
-await agent.sendMessage('Hello!');
+await agent.sendMessage("Hello!");
 ```
 
 ---
 
 ## Configuration
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `apiKey` | `string` | Emcy API key |
-| `agentId` | `string` | Agent ID from dashboard |
-| `agentServiceUrl` | `string` | Emcy API URL (default: `https://api.emcy.ai`) |
-| `getToken` | `() => Promise<string \| undefined>` | User auth token for MCP tool calls |
-| `useCookies` | `boolean` | Send cookies with MCP requests (default: `false`) |
-| `externalUserId` | `string` | Optional user ID for conversations |
-| `context` | `Record<string, unknown>` | Extra context sent with each message |
+| Option            | Type                                 | Description                                       |
+| ----------------- | ------------------------------------ | ------------------------------------------------- |
+| `apiKey`          | `string`                             | Emcy API key                                      |
+| `agentId`         | `string`                             | Agent ID from dashboard                           |
+| `agentServiceUrl` | `string`                             | Emcy API URL (default: `https://api.emcy.ai`)     |
+| `getToken`        | `() => Promise<string \| undefined>` | User auth token for MCP tool calls                |
+| `useCookies`      | `boolean`                            | Send cookies with MCP requests (default: `false`) |
+| `externalUserId`  | `string`                             | Optional user ID for conversations                |
+| `context`         | `Record<string, unknown>`            | Extra context sent with each message              |
 
 ---
 

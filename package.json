@@ -32,8 +32,12 @@
     "react-dom": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -43,7 +47,16 @@
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   },
-  "keywords": ["emcy", "mcp", "ai", "chat", "widget", "agent", "llm", "embeddable"],
+  "keywords": [
+    "emcy",
+    "mcp",
+    "ai",
+    "chat",
+    "widget",
+    "agent",
+    "llm",
+    "embeddable"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
