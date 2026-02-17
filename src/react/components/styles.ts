@@ -128,6 +128,7 @@ export const welcomeText: CSSProperties = {
 
 export const userBubble: CSSProperties = {
   maxWidth: '80%',
+  flexShrink: 0,
   padding: '10px 14px',
   borderRadius: '16px 16px 4px 16px',
   backgroundColor: colors.userBubble,
@@ -141,6 +142,7 @@ export const userBubble: CSSProperties = {
 
 export const assistantBubble: CSSProperties = {
   maxWidth: '85%',
+  flexShrink: 0,
   padding: '10px 14px',
   borderRadius: '16px 16px 16px 4px',
   backgroundColor: colors.assistantBubble,

@@ -66,6 +66,7 @@ export function EnhancedToolCallCard({
       style={{
         width: '100%',
         maxWidth: '90%',
+        flexShrink: 0,
         borderRadius: 10,
         backgroundColor: c.bg,
         border: `1px solid ${c.border}`,
