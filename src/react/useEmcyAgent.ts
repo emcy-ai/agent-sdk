@@ -7,7 +7,9 @@ import type {
   SseContentDelta,
   SseToolCall,
   SseError,
+  McpAuthStatusEvent,
 } from '../core/types';
+import type { McpServerStatus } from './components/McpServerStatusBar';
 
 export interface UseEmcyAgentReturn {
   agent: EmcyAgent;
@@ -16,6 +18,7 @@ export interface UseEmcyAgentReturn {
   isThinking: boolean;
   error: SseError | null;
   agentConfig: AgentConfigResponse | null;
+  mcpServers: McpServerStatus[];
   sendMessage: (message: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
@@ -34,6 +37,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
   const [error, setError] = useState<SseError | null>(null);
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
+  const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
 
   if (!agentRef.current) {
     agentRef.current = new EmcyAgent(config);
@@ -115,6 +119,11 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
       setError(err);
     };
 
+    const onMcpAuthStatus = (_event: McpAuthStatusEvent) => {
+      // Refresh MCP server statuses from the agent
+      setMcpServers(agent.getMcpServers());
+    };
+
     agent.on('message', onMessage);
     agent.on('content_delta', onContentDelta);
     agent.on('tool_call', onToolCall);
@@ -123,8 +132,12 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agent.on('thinking', onThinking);
     agent.on('loading', onLoading);
     agent.on('error', onError);
+    agent.on('mcp_auth_status', onMcpAuthStatus);
 
-    agent.init().then(setAgentConfig).catch(() => {});
+    agent.init().then((config) => {
+      setAgentConfig(config);
+      setMcpServers(agent.getMcpServers());
+    }).catch(() => {});
 
     return () => {
       agent.off('message', onMessage);
@@ -135,6 +148,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
       agent.off('thinking', onThinking);
       agent.off('loading', onLoading);
       agent.off('error', onError);
+      agent.off('mcp_auth_status', onMcpAuthStatus);
     };
   }, [agent]);
 
@@ -161,6 +175,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     isThinking,
     error,
     agentConfig,
+    mcpServers,
     sendMessage,
     cancel,
     newConversation,

@@ -19,6 +19,12 @@ export type { InputAreaProps } from './components/InputArea';
 export { WidgetButton } from './components/WidgetButton';
 export type { WidgetButtonProps } from './components/WidgetButton';
 
+// MCP Server Status
+export { McpServerStatusBar } from './components/McpServerStatusBar';
+export type { McpServerStatusBarProps, McpServerStatus } from './components/McpServerStatusBar';
+export { OAuthStubPopup } from './components/OAuthStubPopup';
+export type { OAuthStubPopupProps } from './components/OAuthStubPopup';
+
 // Enhanced components
 export { EnhancedToolCallCard } from './components/EnhancedToolCallCard';
 export type { EnhancedToolCallCardProps } from './components/EnhancedToolCallCard';

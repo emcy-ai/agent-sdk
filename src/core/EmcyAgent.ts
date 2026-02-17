@@ -10,6 +10,7 @@ import type {
   SseMessageEnd,
   SseMessageStart,
   SseError,
+  McpAuthStatusEvent,
 } from './types';
 
 type EventHandler<T> = (data: T) => void;
@@ -35,7 +36,11 @@ export class EmcyAgent {
   private abortController: AbortController | null = null;
   private isLoading = false;
   private listeners: Map<string, Set<EventHandler<unknown>>> = new Map();
-  private mcpSessionId: string | null = null;
+  /** Per-server MCP session tracking */
+  private mcpSessions: Map<string, {
+    sessionId: string | null;
+    authStatus: 'connected' | 'needs_auth';
+  }> = new Map();
 
   constructor(config: EmcyAgentConfig) {
     this.config = {
@@ -44,10 +49,10 @@ export class EmcyAgent {
     };
   }
 
-  /** Initialize: fetch agent config (tools, widget settings, MCP server URL) */
+  /** Initialize: fetch workspace config (tools, widget settings, MCP servers) */
   async init(): Promise<AgentConfigResponse> {
     const response = await fetch(
-      `${this.config.agentServiceUrl}/api/v1/agents/${this.config.agentId}/config`,
+      `${this.config.agentServiceUrl}/api/v1/workspaces/${this.config.agentId}/config`,
       {
         headers: {
           Authorization: `Bearer ${this.config.apiKey}`,
@@ -56,12 +61,35 @@ export class EmcyAgent {
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Failed to fetch agent config' }));
+      const error = await response.json().catch(() => ({ message: 'Failed to fetch workspace config' }));
       throw new Error(error.message ?? `HTTP ${response.status}`);
     }
 
     this.agentConfig = await response.json();
+
+    // Pre-initialize session tracking for each MCP server
+    if (this.agentConfig?.mcpServers) {
+      for (const server of this.agentConfig.mcpServers) {
+        if (!this.mcpSessions.has(server.url)) {
+          this.mcpSessions.set(server.url, {
+            sessionId: null,
+            authStatus: server.authStatus || 'connected',
+          });
+        }
+      }
+    }
+
     return this.agentConfig!;
+  }
+
+  /** Get current MCP server auth statuses */
+  getMcpServers(): Array<{ url: string; name: string; authStatus: 'connected' | 'needs_auth' }> {
+    if (!this.agentConfig?.mcpServers) return [];
+    return this.agentConfig.mcpServers.map(server => ({
+      url: server.url,
+      name: server.name,
+      authStatus: this.mcpSessions.get(server.url)?.authStatus ?? server.authStatus ?? 'connected',
+    }));
   }
 
   /** Send a message and process the full orchestration loop (including tool calls) */
@@ -386,23 +414,25 @@ export class EmcyAgent {
    * The user's auth token flows browser → MCP, never through Emcy.
    */
   /** Build headers for MCP server requests */
-  private getMcpHeaders(): Record<string, string> {
+  private getMcpHeaders(mcpServerUrl: string): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/event-stream',
     };
-    if (this.mcpSessionId) {
-      headers['Mcp-Session-Id'] = this.mcpSessionId;
+    const session = this.mcpSessions.get(mcpServerUrl);
+    if (session?.sessionId) {
+      headers['Mcp-Session-Id'] = session.sessionId;
     }
     return headers;
   }
 
-  /** Initialize the MCP session (required before tools/call) */
+  /** Initialize the MCP session for a specific server (required before tools/call) */
   private async initMcpSession(mcpServerUrl: string): Promise<void> {
-    if (this.mcpSessionId) return;
+    const session = this.mcpSessions.get(mcpServerUrl);
+    if (session?.sessionId) return;
 
-    const headers = this.getMcpHeaders();
-    const token = this.config.getToken ? await this.config.getToken() : undefined;
+    const headers = this.getMcpHeaders(mcpServerUrl);
+    const token = this.config.getToken ? await this.config.getToken(mcpServerUrl) : undefined;
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     // Step 1: Send initialize request
@@ -423,18 +453,26 @@ export class EmcyAgent {
     });
 
     if (!initResponse.ok) {
+      // If 401, update auth status for this server
+      if (initResponse.status === 401) {
+        this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
+      }
       const errorText = await initResponse.text().catch(() => 'MCP init error');
       throw new Error(`MCP initialization failed (${initResponse.status}): ${errorText}`);
     }
 
-    // Capture session ID from response header (read before consuming body)
-    this.mcpSessionId = initResponse.headers.get('mcp-session-id');
+    // Capture session ID from response header
+    const sessionId = initResponse.headers.get('mcp-session-id');
+    this.mcpSessions.set(mcpServerUrl, {
+      sessionId,
+      authStatus: 'connected',
+    });
 
     // Consume the response body so the connection can be reused
     await initResponse.text().catch(() => {});
 
     // Step 2: Send initialized notification
-    const notifyHeaders = this.getMcpHeaders();
+    const notifyHeaders = this.getMcpHeaders(mcpServerUrl);
     if (token) notifyHeaders['Authorization'] = `Bearer ${token}`;
 
     await fetch(mcpServerUrl, {
@@ -445,6 +483,24 @@ export class EmcyAgent {
         jsonrpc: '2.0',
         method: 'notifications/initialized',
       }),
+    });
+  }
+
+  /** Update auth status for an MCP server and emit event */
+  private updateMcpAuthStatus(mcpServerUrl: string, authStatus: 'connected' | 'needs_auth'): void {
+    const session = this.mcpSessions.get(mcpServerUrl);
+    if (session) {
+      session.authStatus = authStatus;
+    } else {
+      this.mcpSessions.set(mcpServerUrl, { sessionId: null, authStatus });
+    }
+
+    // Find the server name from config
+    const serverInfo = this.agentConfig?.mcpServers?.find(s => s.url === mcpServerUrl);
+    this.emit('mcp_auth_status', {
+      mcpServerUrl,
+      mcpServerName: serverInfo?.name ?? mcpServerUrl,
+      authStatus,
     });
   }
 
@@ -471,16 +527,17 @@ export class EmcyAgent {
   }
 
   private async executeTool(toolCall: SseToolCall): Promise<unknown> {
-    const mcpServerUrl = this.agentConfig?.mcpServerUrl;
+    // Route to the correct MCP server based on the tool call event
+    const mcpServerUrl = toolCall.mcpServerUrl || this.agentConfig?.mcpServerUrl;
     if (!mcpServerUrl) {
-      throw new Error('MCP server URL not configured on agent');
+      throw new Error('No MCP server URL for tool call');
     }
 
-    // Ensure MCP session is initialized
+    // Ensure MCP session is initialized for this specific server
     await this.initMcpSession(mcpServerUrl);
 
-    const token = this.config.getToken ? await this.config.getToken() : undefined;
-    const headers = this.getMcpHeaders();
+    const token = this.config.getToken ? await this.config.getToken(mcpServerUrl) : undefined;
+    const headers = this.getMcpHeaders(mcpServerUrl);
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     let response = await fetch(mcpServerUrl, {
@@ -500,10 +557,11 @@ export class EmcyAgent {
     });
 
     // If session expired (404 = session not found), reinitialize and retry once
-    if (response.status === 404 && this.mcpSessionId) {
-      this.mcpSessionId = null;
+    const session = this.mcpSessions.get(mcpServerUrl);
+    if (response.status === 404 && session?.sessionId) {
+      this.mcpSessions.set(mcpServerUrl, { ...session, sessionId: null });
       await this.initMcpSession(mcpServerUrl);
-      const retryHeaders = this.getMcpHeaders();
+      const retryHeaders = this.getMcpHeaders(mcpServerUrl);
       if (token) retryHeaders['Authorization'] = `Bearer ${token}`;
       response = await fetch(mcpServerUrl, {
         method: 'POST',
@@ -522,9 +580,22 @@ export class EmcyAgent {
       });
     }
 
+    // If 401, update auth status to needs_auth
+    if (response.status === 401) {
+      this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
+      const errorText = await response.text().catch(() => 'Authentication required');
+      throw new Error(`Tool execution failed (401): ${errorText}`);
+    }
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'MCP server error');
       throw new Error(`Tool execution failed (${response.status}): ${errorText}`);
+    }
+
+    // If we got here, auth is good — ensure status is connected
+    const currentSession = this.mcpSessions.get(mcpServerUrl);
+    if (currentSession?.authStatus === 'needs_auth') {
+      this.updateMcpAuthStatus(mcpServerUrl, 'connected');
     }
 
     const result = await this.parseMcpResponse(response) as {

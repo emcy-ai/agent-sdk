@@ -2,6 +2,8 @@ import React from 'react';
 import type { ChatMessage } from '../../core/types';
 import type { SseError } from '../../core/types';
 import { StyleInjector } from './AnimationStyles';
+import { McpServerStatusBar } from './McpServerStatusBar';
+import type { McpServerStatus } from './McpServerStatusBar';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { PlusIcon, CloseIcon } from './Icons';
@@ -16,9 +18,11 @@ export interface ChatWindowProps {
   title?: string;
   welcomeMessage?: string;
   placeholder?: string;
+  mcpServers?: McpServerStatus[];
   onSend: (message: string) => void;
   onClose?: () => void;
   onNewConversation?: () => void;
+  onMcpAuthClick?: (serverUrl: string, serverName: string) => void;
 }
 
 export function ChatWindow({
@@ -30,9 +34,11 @@ export function ChatWindow({
   title = 'AI Assistant',
   welcomeMessage,
   placeholder,
+  mcpServers,
   onSend,
   onClose,
   onNewConversation,
+  onMcpAuthClick,
 }: ChatWindowProps) {
   return (
     <div style={styles.chatWindow}>
@@ -66,6 +72,9 @@ export function ChatWindow({
           )}
         </div>
       </div>
+
+      {/* MCP Server Status */}
+      <McpServerStatusBar servers={mcpServers || []} onAuthClick={onMcpAuthClick} />
 
       {/* Messages */}
       <MessageList

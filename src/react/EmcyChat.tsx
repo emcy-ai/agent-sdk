@@ -3,6 +3,7 @@ import type { EmcyAgentConfig } from '../core/types';
 import { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
 import { ChatWindow } from './components/ChatWindow';
 import { WidgetButton } from './components/WidgetButton';
+import { OAuthStubPopup } from './components/OAuthStubPopup';
 
 export interface EmcyChatProps extends EmcyAgentConfig {
   /** Display mode: 'floating' shows as a widget button, 'inline' renders directly */
@@ -24,8 +25,8 @@ export interface EmcyChatProps extends EmcyAgentConfig {
  * ```tsx
  * <EmcyChat
  *   apiKey="emcy_sk_xxxx_yyyy"
- *   agentId="agent_xxxxx"
- *   getToken={async () => session.accessToken}
+ *   agentId="ws_xxxxx"
+ *   getToken={async (mcpServerUrl) => session.accessToken}
  *   title="AI Assistant"
  * />
  * ```
@@ -70,7 +71,8 @@ function EmcyChatInner({
 }: EmcyChatInnerProps) {
   const [animState, setAnimState] = useState<AnimState>(defaultOpen ? 'open' : 'closed');
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation } =
+  const [oauthPopup, setOauthPopup] = useState<{ serverUrl: string; serverName: string } | null>(null);
+  const { messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers } =
     useEmcyChatContext();
 
   // Use widget config from agent if no explicit props
@@ -98,23 +100,38 @@ function EmcyChatInner({
     else if (animState === 'open') handleClose();
   };
 
+  const handleMcpAuthClick = (serverUrl: string, serverName: string) => {
+    setOauthPopup({ serverUrl, serverName });
+  };
+
   const isOpen = animState === 'open' || animState === 'opening';
   const isVisible = animState !== 'closed';
 
   if (mode === 'inline') {
     return (
-      <ChatWindow
-        messages={messages}
-        streamingContent={streamingContent}
-        isLoading={isLoading}
-        isThinking={isThinking}
-        error={error}
-        title={resolvedTitle}
-        welcomeMessage={resolvedWelcome}
-        placeholder={resolvedPlaceholder}
-        onSend={sendMessage}
-        onNewConversation={newConversation}
-      />
+      <>
+        <ChatWindow
+          messages={messages}
+          streamingContent={streamingContent}
+          isLoading={isLoading}
+          isThinking={isThinking}
+          error={error}
+          title={resolvedTitle}
+          welcomeMessage={resolvedWelcome}
+          placeholder={resolvedPlaceholder}
+          mcpServers={mcpServers}
+          onSend={sendMessage}
+          onNewConversation={newConversation}
+          onMcpAuthClick={handleMcpAuthClick}
+        />
+        {oauthPopup && (
+          <OAuthStubPopup
+            serverName={oauthPopup.serverName}
+            serverUrl={oauthPopup.serverUrl}
+            onClose={() => setOauthPopup(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -135,10 +152,19 @@ function EmcyChatInner({
             title={resolvedTitle}
             welcomeMessage={resolvedWelcome}
             placeholder={resolvedPlaceholder}
+            mcpServers={mcpServers}
             onSend={sendMessage}
             onClose={handleClose}
             onNewConversation={newConversation}
+            onMcpAuthClick={handleMcpAuthClick}
           />
+          {oauthPopup && (
+            <OAuthStubPopup
+              serverName={oauthPopup.serverName}
+              serverUrl={oauthPopup.serverUrl}
+              onClose={() => setOauthPopup(null)}
+            />
+          )}
         </div>
       )}
       <WidgetButton isOpen={isOpen} onClick={handleToggle} />

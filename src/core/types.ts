@@ -14,10 +14,11 @@ export interface EmcyAgentConfig {
 
   /**
    * Callback to get the user's auth token for MCP server calls.
-   * Called before each tool execution. Return the token string.
+   * Called before each tool execution. Receives the MCP server URL
+   * so you can return different tokens per server.
    * If using cookies, return undefined and set `useCookies: true`.
    */
-  getToken?: () => Promise<string | undefined>;
+  getToken?: (mcpServerUrl?: string) => Promise<string | undefined>;
 
   /**
    * If true, MCP server calls include cookies (for cookie-based auth).
@@ -51,13 +52,23 @@ export interface ChatMessage {
 }
 
 // ================================================================
-// Agent Config Response (from GET /agents/{id}/config)
+// Agent Config Response (from GET /workspaces/{id}/config)
 // ================================================================
 
-export interface AgentConfigResponse {
-  agentId: string;
+export interface McpServerInfo {
+  id: string;
   name: string;
-  mcpServerUrl: string;
+  url: string;
+  authStatus: 'connected' | 'needs_auth';
+  tools: AgentToolSchema[];
+}
+
+export interface AgentConfigResponse {
+  workspaceId: string;
+  name: string;
+  /** @deprecated Use mcpServers instead */
+  mcpServerUrl?: string;
+  mcpServers: McpServerInfo[];
   tools: AgentToolSchema[];
   widgetConfig?: WidgetConfig | null;
 }
@@ -92,6 +103,8 @@ export interface SseToolCall {
   toolCallId: string;
   toolName: string;
   arguments: Record<string, unknown>;
+  mcpServerUrl?: string;
+  mcpServerName?: string;
 }
 
 export interface SseMessageEnd {
@@ -109,6 +122,12 @@ export interface SseError {
 // Events emitted by EmcyAgent
 // ================================================================
 
+export interface McpAuthStatusEvent {
+  mcpServerUrl: string;
+  mcpServerName: string;
+  authStatus: 'connected' | 'needs_auth';
+}
+
 export type EmcyAgentEventMap = {
   message: ChatMessage;
   content_delta: SseContentDelta;
@@ -119,6 +138,7 @@ export type EmcyAgentEventMap = {
   error: SseError;
   loading: boolean;
   thinking: boolean;
+  mcp_auth_status: McpAuthStatusEvent;
 };
 
 export type EmcyAgentEvent = keyof EmcyAgentEventMap;
