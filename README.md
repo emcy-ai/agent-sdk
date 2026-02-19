@@ -4,6 +4,8 @@ Embeddable AI chat widget powered by MCP. Add an LLM-powered agent to your web a
 
 Part of the [Emcy](https://emcy.ai) ecosystem — open source under MIT.
 
+v.0.1.0
+
 ---
 
 ## Features
