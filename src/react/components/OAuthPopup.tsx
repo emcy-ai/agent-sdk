@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import * as styles from './styles';
-import type { McpServerAuthConfig } from '../../core/types';
+import type { McpServerAuthConfig, OAuthTokenResponse } from '../../core/types';
 
 export interface OAuthPopupProps {
   serverName: string;
   serverUrl: string;
   authConfig: McpServerAuthConfig;
-  onToken: (token: string) => void;
+  /** Called with the full token response (access token, refresh token, expiry) */
+  onToken: (tokenResponse: OAuthTokenResponse) => void;
   onClose: () => void;
 }
 
@@ -116,9 +117,20 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      // Legacy: simple token string
       if (event.data?.type === 'emcy-oauth-callback' && event.data?.token) {
         cleanup();
-        onToken(event.data.token);
+        onToken({ accessToken: event.data.token });
+      }
+      // Full token response with refresh token
+      if (event.data?.type === 'emcy-oauth-callback' && event.data?.accessToken) {
+        cleanup();
+        onToken({
+          accessToken: event.data.accessToken,
+          refreshToken: event.data.refreshToken,
+          expiresIn: event.data.expiresIn,
+          tokenType: event.data.tokenType,
+        });
       }
       if (event.data?.type === 'emcy-oauth-code' && event.data?.code) {
         exchangeCodeForToken(event.data.code);
@@ -157,7 +169,13 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         const data = await response.json();
         if (data.access_token) {
           cleanup();
-          onToken(data.access_token);
+          // Return full token response including refresh token
+          onToken({
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresIn: data.expires_in,
+            tokenType: data.token_type,
+          });
         }
       }
     } catch {

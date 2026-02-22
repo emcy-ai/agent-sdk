@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { EmcyAgentConfig, McpServerAuthConfig } from '../core/types';
+import type { EmcyAgentConfig, McpServerAuthConfig, OAuthTokenResponse } from '../core/types';
 import { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
 import { ChatWindow } from './components/ChatWindow';
 import { WidgetButton } from './components/WidgetButton';
@@ -115,9 +115,9 @@ function EmcyChatInner({
     }
   };
 
-  const handleOAuthToken = async (token: string) => {
+  const handleOAuthToken = async (tokenResponse: OAuthTokenResponse) => {
     if (oauthPopup) {
-      await agent.authenticate(oauthPopup.serverUrl, token);
+      await agent.authenticate(oauthPopup.serverUrl, tokenResponse);
     }
     setOauthPopup(null);
   };

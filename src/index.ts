@@ -7,6 +7,7 @@ export type {
   McpServerInfo,
   McpServerAuthConfig,
   McpAuthStatusEvent,
+  OAuthTokenResponse,
   WidgetConfig,
   EmcyAgentEvent,
   EmcyAgentEventMap,

@@ -19,18 +19,19 @@ export interface EmcyAgentConfig {
    * If using cookies, return undefined and set `useCookies: true`.
    *
    * In embedded mode, the host app provides this to supply tokens
-   * from its own auth system.
+   * from its own auth system. Include refreshToken for automatic renewal.
    */
-  getToken?: (mcpServerUrl?: string) => Promise<string | undefined>;
+  getToken?: (mcpServerUrl?: string) => Promise<OAuthTokenResponse | undefined>;
 
   /**
    * Called when an MCP server requires authentication and no `getToken`
    * callback is provided (standalone mode). The SDK will invoke this
    * so the integrator can trigger a login flow.
    *
-   * Return the access token on success, or undefined to cancel.
+   * Return the token response on success, or undefined to cancel.
+   * Include refreshToken for automatic renewal.
    */
-  onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<string | undefined>;
+  onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse | undefined>;
 
   /**
    * If true, MCP server calls include cookies (for cookie-based auth).
@@ -74,6 +75,14 @@ export interface McpServerAuthConfig {
   tokenUrl?: string;
   clientId?: string;
   scopes?: string[];
+}
+
+/** OAuth token response from token endpoint */
+export interface OAuthTokenResponse {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  tokenType?: string;
 }
 
 export interface McpServerInfo {
