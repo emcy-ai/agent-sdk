@@ -46,6 +46,7 @@ export const widgetButton: CSSProperties = {
   transition: 'background-color 0.2s, transform 0.2s, box-shadow 0.2s',
 };
 
+/** Floating popup variant: fixed overlay for mode="floating" */
 export const chatWindow: CSSProperties = {
   position: 'fixed',
   bottom: '96px',
@@ -61,6 +62,28 @@ export const chatWindow: CSSProperties = {
   flexDirection: 'column',
   overflow: 'hidden',
   zIndex: 9999,
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+};
+
+/**
+ * Inline variant: responsive, fills its container.
+ * Use mode="inline" when embedding in a dashboard, sidebar, or any layout.
+ * Parent container should have defined dimensions (e.g. height: 400px, flex: 1, or height: 100%).
+ */
+export const chatWindowInline: CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  height: '100%',
+  minWidth: 0,
+  minHeight: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  backgroundColor: colors.bg,
+  border: 'none',
+  borderRadius: 0,
+  boxShadow: 'none',
   fontFamily:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
 };

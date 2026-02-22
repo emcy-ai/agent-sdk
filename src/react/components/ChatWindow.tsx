@@ -23,6 +23,8 @@ export interface ChatWindowProps {
   onClose?: () => void;
   onNewConversation?: () => void;
   onMcpAuthClick?: (serverUrl: string, serverName: string) => void;
+  /** 'floating' = fixed card (default), 'inline' = fill container */
+  variant?: 'floating' | 'inline';
 }
 
 export function ChatWindow({
@@ -39,9 +41,11 @@ export function ChatWindow({
   onClose,
   onNewConversation,
   onMcpAuthClick,
+  variant = 'floating',
 }: ChatWindowProps) {
+  const containerStyle = variant === 'inline' ? styles.chatWindowInline : styles.chatWindow;
   return (
-    <div style={styles.chatWindow}>
+    <div style={containerStyle}>
       <StyleInjector />
 
       {/* Header */}

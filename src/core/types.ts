@@ -17,8 +17,20 @@ export interface EmcyAgentConfig {
    * Called before each tool execution. Receives the MCP server URL
    * so you can return different tokens per server.
    * If using cookies, return undefined and set `useCookies: true`.
+   *
+   * In embedded mode, the host app provides this to supply tokens
+   * from its own auth system.
    */
   getToken?: (mcpServerUrl?: string) => Promise<string | undefined>;
+
+  /**
+   * Called when an MCP server requires authentication and no `getToken`
+   * callback is provided (standalone mode). The SDK will invoke this
+   * so the integrator can trigger a login flow.
+   *
+   * Return the access token on success, or undefined to cancel.
+   */
+  onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<string | undefined>;
 
   /**
    * If true, MCP server calls include cookies (for cookie-based auth).
@@ -55,12 +67,22 @@ export interface ChatMessage {
 // Agent Config Response (from GET /workspaces/{id}/config)
 // ================================================================
 
+export interface McpServerAuthConfig {
+  authType: 'none' | 'apiKey' | 'bearer' | 'oauth2';
+  authorizationServerUrl?: string;
+  loginUrl?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  scopes?: string[];
+}
+
 export interface McpServerInfo {
   id: string;
   name: string;
   url: string;
   authStatus: 'connected' | 'needs_auth';
   tools: AgentToolSchema[];
+  authConfig?: McpServerAuthConfig | null;
 }
 
 export interface AgentConfigResponse {

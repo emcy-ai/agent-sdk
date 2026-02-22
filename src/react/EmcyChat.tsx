@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { EmcyAgentConfig } from '../core/types';
+import type { EmcyAgentConfig, McpServerAuthConfig } from '../core/types';
 import { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
 import { ChatWindow } from './components/ChatWindow';
 import { WidgetButton } from './components/WidgetButton';
-import { OAuthStubPopup } from './components/OAuthStubPopup';
+import { OAuthPopup } from './components/OAuthPopup';
 
 export interface EmcyChatProps extends EmcyAgentConfig {
-  /** Display mode: 'floating' shows as a widget button, 'inline' renders directly */
+  /**
+   * Display mode:
+   * - 'floating': Chatbot popup — fixed button in corner, opens as overlay (default)
+   * - 'inline': Full-window embedded — responsive, fills its container. Parent needs defined dimensions.
+   */
   mode?: 'floating' | 'inline';
   /** Chat window title */
   title?: string;
@@ -71,8 +75,12 @@ function EmcyChatInner({
 }: EmcyChatInnerProps) {
   const [animState, setAnimState] = useState<AnimState>(defaultOpen ? 'open' : 'closed');
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [oauthPopup, setOauthPopup] = useState<{ serverUrl: string; serverName: string } | null>(null);
-  const { messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers } =
+  const [oauthPopup, setOauthPopup] = useState<{
+    serverUrl: string;
+    serverName: string;
+    authConfig: McpServerAuthConfig;
+  } | null>(null);
+  const { agent, messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers } =
     useEmcyChatContext();
 
   // Use widget config from agent if no explicit props
@@ -101,7 +109,17 @@ function EmcyChatInner({
   };
 
   const handleMcpAuthClick = (serverUrl: string, serverName: string) => {
-    setOauthPopup({ serverUrl, serverName });
+    const authConfig = agent.getServerAuthConfig(serverUrl);
+    if (authConfig) {
+      setOauthPopup({ serverUrl, serverName, authConfig });
+    }
+  };
+
+  const handleOAuthToken = async (token: string) => {
+    if (oauthPopup) {
+      await agent.authenticate(oauthPopup.serverUrl, token);
+    }
+    setOauthPopup(null);
   };
 
   const isOpen = animState === 'open' || animState === 'opening';
@@ -111,6 +129,7 @@ function EmcyChatInner({
     return (
       <>
         <ChatWindow
+          variant="inline"
           messages={messages}
           streamingContent={streamingContent}
           isLoading={isLoading}
@@ -125,9 +144,11 @@ function EmcyChatInner({
           onMcpAuthClick={handleMcpAuthClick}
         />
         {oauthPopup && (
-          <OAuthStubPopup
+          <OAuthPopup
             serverName={oauthPopup.serverName}
             serverUrl={oauthPopup.serverUrl}
+            authConfig={oauthPopup.authConfig}
+            onToken={handleOAuthToken}
             onClose={() => setOauthPopup(null)}
           />
         )}
@@ -159,9 +180,11 @@ function EmcyChatInner({
             onMcpAuthClick={handleMcpAuthClick}
           />
           {oauthPopup && (
-            <OAuthStubPopup
+            <OAuthPopup
               serverName={oauthPopup.serverName}
               serverUrl={oauthPopup.serverUrl}
+              authConfig={oauthPopup.authConfig}
+              onToken={handleOAuthToken}
               onClose={() => setOauthPopup(null)}
             />
           )}

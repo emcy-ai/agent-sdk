@@ -88,19 +88,54 @@ await agent.sendMessage("Hello!");
 
 ### `<EmcyChat />`
 
-Drop-in widget.
+Drop-in widget with two visual modes:
+
+#### 1. Floating popup (default)
+
+Chatbot button in the corner; opens as an overlay. Best for support widgets on customer sites.
 
 ```tsx
 <EmcyChat
   apiKey="..."
   agentId="..."
-  mode="floating" | "inline"
+  mode="floating"
   title="AI Assistant"
-  welcomeMessage="How can I help?"
-  placeholder="Type a message..."
   defaultOpen={false}
 />
 ```
+
+#### 2. Inline embedded
+
+Responsive full-window chat that fills its container. Use in dashboards, sidebars, or any layout. **Parent must have defined dimensions** (e.g. `height: 400px`, `flex: 1`, or `height: 100%`).
+
+```tsx
+<div style={{ height: '500px' }}>
+  <EmcyChat
+    apiKey="..."
+    agentId="..."
+    mode="inline"
+    title="Support Chat"
+  />
+</div>
+```
+
+Or in a flex layout:
+
+```tsx
+<div className="flex flex-col h-[calc(100vh-200px)]">
+  <div className="flex-1 min-h-0">
+    <EmcyChat mode="inline" apiKey="..." agentId="..." />
+  </div>
+</div>
+```
+
+| Prop            | Type                | Description                                                       |
+| --------------- | ------------------- | ----------------------------------------------------------------- |
+| `mode`          | `'floating' \| 'inline'` | `floating` = popup overlay, `inline` = fill container (default: `floating`) |
+| `title`         | `string`            | Chat window title                                                 |
+| `welcomeMessage`| `string`            | Shown when no messages exist                                      |
+| `placeholder`   | `string`            | Input placeholder                                                 |
+| `defaultOpen`   | `boolean`           | Start open (floating mode only, default: `false`)                 |
 
 ### `useEmcyAgent(config)`
 

@@ -5,6 +5,7 @@ export type {
   AgentConfigResponse,
   AgentToolSchema,
   McpServerInfo,
+  McpServerAuthConfig,
   McpAuthStatusEvent,
   WidgetConfig,
   EmcyAgentEvent,

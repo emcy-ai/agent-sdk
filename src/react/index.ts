@@ -22,6 +22,9 @@ export type { WidgetButtonProps } from './components/WidgetButton';
 // MCP Server Status
 export { McpServerStatusBar } from './components/McpServerStatusBar';
 export type { McpServerStatusBarProps, McpServerStatus } from './components/McpServerStatusBar';
+export { OAuthPopup } from './components/OAuthPopup';
+export type { OAuthPopupProps } from './components/OAuthPopup';
+/** @deprecated Use OAuthPopup instead */
 export { OAuthStubPopup } from './components/OAuthStubPopup';
 export type { OAuthStubPopupProps } from './components/OAuthStubPopup';
 
