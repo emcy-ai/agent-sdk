@@ -1,6 +1,6 @@
 {
   "name": "@emcy/agent-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -21,7 +21,11 @@
       "require": "./dist/react/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -34,8 +38,12 @@
     "react-dom": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -45,7 +53,16 @@
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   },
-  "keywords": ["emcy", "mcp", "ai", "chat", "widget", "agent", "llm", "embeddable"],
+  "keywords": [
+    "emcy",
+    "mcp",
+    "ai",
+    "chat",
+    "widget",
+    "agent",
+    "llm",
+    "embeddable"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
