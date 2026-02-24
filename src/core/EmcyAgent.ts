@@ -475,8 +475,37 @@ export class EmcyAgent {
           }
 
           this.emit('tool_error', { toolCallId: toolCall.toolCallId, error: errorMsg, duration });
-          this.emit('error', { code: 'tool_error', message: errorMsg });
-          break;
+
+          // Send error as tool_result so the conversation history stays valid
+          // (Anthropic requires every tool_use to have a matching tool_result)
+          const errorResult = `Error: ${errorMsg}`;
+          const toolResultMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'tool_result',
+            content: errorResult,
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            timestamp: new Date(),
+          };
+          this.messages.push(toolResultMsg);
+
+          this.emit('thinking', true);
+
+          try {
+            response = await this.callChatApi(
+              {
+                conversationId: this.conversationId!,
+                toolCallId: toolCall.toolCallId,
+                result: errorResult,
+                isError: true,
+              },
+              'chat/tool-result',
+            );
+          } catch {
+            // If sending the error result also fails, break to avoid infinite loop
+            this.emit('error', { code: 'tool_error', message: errorMsg });
+            break;
+          }
         }
       }
 
