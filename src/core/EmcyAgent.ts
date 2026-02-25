@@ -98,14 +98,19 @@ export class EmcyAgent {
     if (this.agentConfig?.mcpServers) {
       for (const server of this.agentConfig.mcpServers) {
         if (!this.mcpSessions.has(server.url)) {
-          // For embed mode (getToken provided), always start with server's auth status
-          // For OAuth mode, check if we have a valid stored token
-          const hasValidToken = this.config.getToken
-            ? false
-            : this.hasValidOAuthToken(server.url);
-          const authStatus = hasValidToken
-            ? 'connected'
-            : (server.authStatus || 'connected');
+          let authStatus: 'connected' | 'needs_auth';
+
+          if (this.config.getToken) {
+            // Embedded mode: always show "connected" - host app manages auth
+            authStatus = 'connected';
+          } else if (this.hasValidOAuthToken(server.url)) {
+            // OAuth mode with valid stored token
+            authStatus = 'connected';
+          } else {
+            // OAuth mode without token - use server's auth status
+            authStatus = server.authStatus || 'connected';
+          }
+
           this.mcpSessions.set(server.url, { sessionId: null, authStatus });
         }
       }

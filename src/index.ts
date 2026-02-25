@@ -6,7 +6,6 @@ export type {
   EmcyAgentConfig,
   ChatMessage,
   AgentConfigResponse,
-  AgentToolSchema,
   McpServerInfo,
   McpServerAuthConfig,
   McpAuthStatusEvent,

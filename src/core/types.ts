@@ -117,7 +117,6 @@ export interface McpServerInfo {
   name: string;
   url: string;
   authStatus: 'connected' | 'needs_auth';
-  tools: AgentToolSchema[];
   authConfig?: McpServerAuthConfig | null;
 }
 
@@ -127,14 +126,7 @@ export interface AgentConfigResponse {
   /** @deprecated Use mcpServers instead */
   mcpServerUrl?: string;
   mcpServers: McpServerInfo[];
-  tools: AgentToolSchema[];
   widgetConfig?: WidgetConfig | null;
-}
-
-export interface AgentToolSchema {
-  name: string;
-  description?: string;
-  inputSchemaJson?: string;
 }
 
 export interface WidgetConfig {
