@@ -214,7 +214,7 @@ export class EmcyAgent {
 
   /**
    * Proactively authenticate with an MCP server before sending a message.
-   * In embedded mode (getToken provided), this calls getToken.
+   * In embedded mode (getToken provided), this calls getToken and verifies via MCP init.
    * In standalone mode, this invokes onAuthRequired to trigger a login flow.
    *
    * @param mcpServerUrl - The MCP server URL to authenticate with
@@ -230,11 +230,14 @@ export class EmcyAgent {
       return true;
     }
     const resolved = await this.resolveToken(mcpServerUrl);
-    if (resolved) {
-      this.updateMcpAuthStatus(mcpServerUrl, 'connected');
+    if (!resolved) return false;
+    try {
+      await this.initMcpSession(mcpServerUrl);
       return true;
+    } catch {
+      this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
+      return false;
     }
-    return false;
   }
 
   /** Get the auth config for an MCP server (from workspace config) */
@@ -725,7 +728,11 @@ export class EmcyAgent {
     if (this.config.getToken) {
       const tokenResponse = await this.config.getToken(mcpServerUrl);
       if (tokenResponse) {
-        return this.cacheTokenResponse(mcpServerUrl, tokenResponse);
+        const normalized =
+          typeof tokenResponse === 'string'
+            ? { accessToken: tokenResponse, expiresIn: 3600 }
+            : tokenResponse;
+        return this.cacheTokenResponse(mcpServerUrl, normalized);
       }
     }
 

@@ -19,6 +19,7 @@ export interface EmcyChatContextValue {
   error: SseError | null;
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
+  hasGetToken: boolean;
   sendMessage: (message: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
@@ -142,9 +143,17 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     agent.on('mcp_auth_status', onMcpAuthStatus);
 
     // Initialize agent
-    agent.init().then((config) => {
-      setAgentConfig(config);
+    agent.init().then((initConfig) => {
+      setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
+      // Proactive auth: when getToken is provided, try to authenticate needs_auth servers in background
+      if (config.getToken) {
+        for (const server of agent.getMcpServers()) {
+          if (server.authStatus === 'needs_auth') {
+            agent.authenticate(server.url).catch(() => {});
+          }
+        }
+      }
     }).catch(() => {});
 
     return () => {
@@ -186,6 +195,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         error,
         agentConfig,
         mcpServers,
+        hasGetToken: !!config.getToken,
         sendMessage,
         cancel,
         newConversation,

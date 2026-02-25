@@ -41,7 +41,7 @@ export interface EmcyAgentConfig {
    * In embedded mode, the host app provides this to supply tokens
    * from its own auth system. Include refreshToken for automatic renewal.
    */
-  getToken?: (mcpServerUrl?: string) => Promise<OAuthTokenResponse | undefined>;
+  getToken?: (mcpServerUrl?: string) => Promise<OAuthTokenResponse | string | undefined>;
 
   /**
    * Called when an MCP server requires authentication and no `getToken`

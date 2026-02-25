@@ -80,7 +80,7 @@ function EmcyChatInner({
     serverName: string;
     authConfig: McpServerAuthConfig;
   } | null>(null);
-  const { agent, messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers } =
+  const { agent, messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers, hasGetToken } =
     useEmcyChatContext();
 
   // Use widget config from agent if no explicit props
@@ -109,9 +109,13 @@ function EmcyChatInner({
   };
 
   const handleMcpAuthClick = (serverUrl: string, serverName: string) => {
-    const authConfig = agent.getServerAuthConfig(serverUrl);
-    if (authConfig) {
-      setOauthPopup({ serverUrl, serverName, authConfig });
+    if (hasGetToken) {
+      agent.authenticate(serverUrl).catch(() => {});
+    } else {
+      const authConfig = agent.getServerAuthConfig(serverUrl);
+      if (authConfig) {
+        setOauthPopup({ serverUrl, serverName, authConfig });
+      }
     }
   };
 

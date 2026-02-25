@@ -77,10 +77,12 @@ await agent.sendMessage("Hello!");
 | `apiKey`          | `string`                             | Emcy API key                                      |
 | `agentId`         | `string`                             | Agent ID from dashboard                           |
 | `agentServiceUrl` | `string`                             | Emcy API URL (default: `https://api.emcy.ai`)     |
-| `getToken`        | `() => Promise<string \| undefined>` | User auth token for MCP tool calls                |
+| `getToken`        | `() => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. Can return a plain access token string or `{ accessToken, refreshToken?, expiresIn? }`. |
 | `useCookies`      | `boolean`                            | Send cookies with MCP requests (default: `false`) |
 | `externalUserId`  | `string`                             | Optional user ID for conversations                |
 | `context`         | `Record<string, unknown>`            | Extra context sent with each message              |
+
+**Embedded vs standalone auth:** When you provide `getToken` (embedded mode), the SDK uses your app's session for MCP auth. It proactively authenticates `needs_auth` servers on init, and "Needs Auth" clicks trigger `getToken` instead of an OAuth popup. Without `getToken` (standalone mode), "Needs Auth" opens an OAuth popup and uses `onAuthRequired` for login flows.
 
 ---
 
