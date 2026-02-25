@@ -1,4 +1,24 @@
 // ================================================================
+// Client Tools (execute locally in browser, exposed to LLM)
+// ================================================================
+
+export interface ClientToolParameter {
+  type: string;
+  description: string;
+  required?: boolean;
+  enum?: string[];
+}
+
+export interface ClientToolDefinition {
+  description: string;
+  parameters: Record<string, ClientToolParameter>;
+  execute: (params: Record<string, unknown>) => Promise<unknown>;
+  requireConfirmation?: boolean;
+}
+
+export type ClientToolsMap = Record<string, ClientToolDefinition>;
+
+// ================================================================
 // Configuration
 // ================================================================
 
@@ -44,6 +64,12 @@ export interface EmcyAgentConfig {
 
   /** Optional: additional context sent with each message */
   context?: Record<string, unknown>;
+
+  /**
+   * Client tools — execute locally in browser, exposed to LLM.
+   * The agent can call these to interact with the host app (e.g. fill forms, read page state).
+   */
+  clientTools?: ClientToolsMap;
 }
 
 // ================================================================
@@ -136,6 +162,8 @@ export interface SseToolCall {
   arguments: Record<string, unknown>;
   mcpServerUrl?: string;
   mcpServerName?: string;
+  /** When 'client', execute locally via clientTools; when 'mcp' or absent with mcpServerUrl, use MCP */
+  source?: 'client' | 'mcp';
 }
 
 export interface SseMessageEnd {

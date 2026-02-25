@@ -1,5 +1,6 @@
 import { parseSseStream } from './sse-client';
 import type {
+  ClientToolParameter,
   EmcyAgentConfig,
   AgentConfigResponse,
   ChatMessage,
@@ -16,6 +17,22 @@ import type {
 } from './types';
 
 type EventHandler<T> = (data: T) => void;
+
+/** Convert client tool parameters to JSON Schema for the API */
+function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
+  const properties: Record<string, object> = {};
+  const required: string[] = [];
+  for (const [key, p] of Object.entries(params)) {
+    const prop: Record<string, unknown> = {
+      type: p.type,
+      description: p.description,
+    };
+    if (p.enum) prop.enum = p.enum;
+    properties[key] = prop;
+    if (p.required) required.push(key);
+  }
+  return { type: 'object', properties, required };
+}
 
 /**
  * Core orchestration class for the Emcy Agent SDK.
@@ -178,6 +195,16 @@ export class EmcyAgent {
   /** Get the loaded agent config */
   getAgentConfig(): AgentConfigResponse | null {
     return this.agentConfig;
+  }
+
+  /** Convert client tools to API schema format */
+  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
+    if (!this.config.clientTools) return [];
+    return Object.entries(this.config.clientTools).map(([name, def]) => ({
+      name,
+      description: def.description,
+      inputSchema: parametersToJsonSchema(def.parameters) as object,
+    }));
   }
 
   /** Whether a request is currently in flight */
@@ -397,17 +424,19 @@ export class EmcyAgent {
     this.abortController = new AbortController();
     this.emit('thinking', true);
 
-    // First request: send user message
-    let response = await this.callChatApi(
-      {
-        agentId: this.config.agentId,
-        conversationId: this.conversationId,
-        message,
-        externalUserId: this.config.externalUserId,
-        context: this.config.context,
-      },
-      'chat',
-    );
+    // First request: send user message (include client tools for LLM)
+    const chatBody: Record<string, unknown> = {
+      agentId: this.config.agentId,
+      conversationId: this.conversationId,
+      message,
+      externalUserId: this.config.externalUserId,
+      context: this.config.context,
+    };
+    const clientToolsSchemas = this.clientToolsToSchemas();
+    if (clientToolsSchemas.length > 0) {
+      chatBody.clientTools = clientToolsSchemas;
+    }
+    let response = await this.callChatApi(chatBody, 'chat');
 
     // Process SSE stream — may loop if there are tool calls
     while (true) {
@@ -452,14 +481,16 @@ export class EmcyAgent {
           this.emit('thinking', true);
 
           // Send tool result back to continue the conversation
-          response = await this.callChatApi(
-            {
-              conversationId: this.conversationId!,
-              toolCallId: toolCall.toolCallId,
-              result: toolResult,
-            },
-            'chat/tool-result',
-          );
+          const toolResultBody: Record<string, unknown> = {
+            conversationId: this.conversationId!,
+            toolCallId: toolCall.toolCallId,
+            result: toolResult,
+          };
+          const clientToolsSchemas = this.clientToolsToSchemas();
+          if (clientToolsSchemas.length > 0) {
+            toolResultBody.clientTools = clientToolsSchemas;
+          }
+          response = await this.callChatApi(toolResultBody, 'chat/tool-result');
         } catch (err) {
           const duration = Date.now() - startTime;
           const errorMsg = err instanceof Error ? err.message : 'Tool execution failed';
@@ -492,15 +523,17 @@ export class EmcyAgent {
           this.emit('thinking', true);
 
           try {
-            response = await this.callChatApi(
-              {
-                conversationId: this.conversationId!,
-                toolCallId: toolCall.toolCallId,
-                result: errorResult,
-                isError: true,
-              },
-              'chat/tool-result',
-            );
+            const toolResultBody: Record<string, unknown> = {
+              conversationId: this.conversationId!,
+              toolCallId: toolCall.toolCallId,
+              result: errorResult,
+              isError: true,
+            };
+            const clientToolsSchemas = this.clientToolsToSchemas();
+            if (clientToolsSchemas.length > 0) {
+              toolResultBody.clientTools = clientToolsSchemas;
+            }
+            response = await this.callChatApi(toolResultBody, 'chat/tool-result');
           } catch {
             // If sending the error result also fails, break to avoid infinite loop
             this.emit('error', { code: 'tool_error', message: errorMsg });
@@ -888,6 +921,19 @@ export class EmcyAgent {
   }
 
   private async executeTool(toolCall: SseToolCall): Promise<unknown> {
+    // Client tools: execute locally (source === 'client' or empty/missing mcpServerUrl)
+    const isClientTool =
+      toolCall.source === 'client' || !toolCall.mcpServerUrl;
+
+    if (isClientTool && this.config.clientTools) {
+      const def = this.config.clientTools[toolCall.toolName];
+      if (def) {
+        const result = await def.execute(toolCall.arguments ?? {});
+        return result;
+      }
+      throw new Error(`Unknown client tool: ${toolCall.toolName}`);
+    }
+
     const mcpServerUrl = toolCall.mcpServerUrl || this.agentConfig?.mcpServerUrl;
     if (!mcpServerUrl) {
       throw new Error('No MCP server URL for tool call');

@@ -116,7 +116,10 @@ export function EnhancedToolCallCard({
           <div style={{ fontSize: 12, color: c.text, opacity: 0.7, marginTop: 1 }}>
             {status === 'calling' && `Executing... ${durationStr}`}
             {status === 'completed' && `Completed in ${durationStr}`}
-            {status === 'error' && `Failed after ${durationStr}`}
+            {status === 'error' &&
+              (error?.toLowerCase().includes('fetch')
+                ? `Network error (${durationStr}) — check MCP Server URL in Dashboard`
+                : `Failed after ${durationStr}`)}
           </div>
         </div>
 
@@ -181,7 +184,7 @@ export function EnhancedToolCallCard({
             }}
           >
             <ChevronIcon size={12} direction={expanded ? 'up' : 'down'} color={c.text} />
-            {expanded ? 'Hide result' : 'Show result'}
+            {expanded ? 'Hide result' : status === 'error' ? 'Show error' : 'Show result'}
           </button>
 
           {expanded && (
@@ -207,7 +210,12 @@ export function EnhancedToolCallCard({
                   lineHeight: 1.4,
                 }}
               >
-                {status === 'error' ? error : result}
+                {status === 'error'
+                  ? error +
+                    (error?.toLowerCase().includes('fetch')
+                      ? '\n\nTip: Ensure MCP Server URL is set to http://localhost:3001/mcp (or your MCP server URL) in Dashboard → MCP Servers → [server] → Settings.'
+                      : '')
+                  : result}
               </pre>
             </div>
           )}

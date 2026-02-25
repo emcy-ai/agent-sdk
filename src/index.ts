@@ -1,5 +1,8 @@
 export { EmcyAgent } from './core/EmcyAgent';
 export type {
+  ClientToolDefinition,
+  ClientToolParameter,
+  ClientToolsMap,
   EmcyAgentConfig,
   ChatMessage,
   AgentConfigResponse,
