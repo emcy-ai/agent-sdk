@@ -11,7 +11,6 @@ import type {
   SseMessageEnd,
   SseMessageStart,
   SseError,
-  McpAuthStatusEvent,
   McpServerAuthConfig,
   OAuthTokenResponse,
 } from './types';
@@ -60,14 +59,14 @@ export class EmcyAgent {
     sessionId: string | null;
     authStatus: 'connected' | 'needs_auth';
   }> = new Map();
-  /** Cached tokens per MCP server URL (includes refresh token for renewal) */
-  private tokenCache: Map<string, {
+  /** OAuth tokens per MCP server URL (standalone mode only) */
+  private oauthTokens: Map<string, {
     accessToken: string;
     refreshToken?: string;
     expiresAt: number;
   }> = new Map();
 
-  /** localStorage key prefix for persisted tokens */
+  /** localStorage key prefix for persisted OAuth tokens */
   private static readonly STORAGE_PREFIX = 'emcy_oauth_';
 
   constructor(config: EmcyAgentConfig) {
@@ -96,32 +95,18 @@ export class EmcyAgent {
     this.agentConfig = await response.json();
 
     // Pre-initialize session tracking for each MCP server
-    // Check localStorage for persisted tokens to restore auth status
     if (this.agentConfig?.mcpServers) {
       for (const server of this.agentConfig.mcpServers) {
         if (!this.mcpSessions.has(server.url)) {
-          // Check if we have a valid persisted token for this server
-          const storedToken = this.loadTokenFromStorage(server.url);
-          
-          // Token is valid if: access token not expired, OR we have a refresh token
-          const hasValidToken = storedToken !== null && (
-            storedToken.expiresAt > Date.now() || storedToken.refreshToken
-          );
-          
-          // If server needs auth but we have a persisted token, mark as connected
-          const authStatus = hasValidToken 
-            ? 'connected' 
+          // For embed mode (getToken provided), always start with server's auth status
+          // For OAuth mode, check if we have a valid stored token
+          const hasValidToken = this.config.getToken
+            ? false
+            : this.hasValidOAuthToken(server.url);
+          const authStatus = hasValidToken
+            ? 'connected'
             : (server.authStatus || 'connected');
-          
-          this.mcpSessions.set(server.url, {
-            sessionId: null,
-            authStatus,
-          });
-
-          // Restore token to in-memory cache if found
-          if (storedToken) {
-            this.tokenCache.set(server.url, storedToken);
-          }
+          this.mcpSessions.set(server.url, { sessionId: null, authStatus });
         }
       }
     }
@@ -148,7 +133,6 @@ export class EmcyAgent {
     this.isLoading = true;
     this.emit('loading', true);
 
-    // Add user message
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -215,22 +199,24 @@ export class EmcyAgent {
   /**
    * Proactively authenticate with an MCP server before sending a message.
    * In embedded mode (getToken provided), this calls getToken and verifies via MCP init.
-   * In standalone mode, this invokes onAuthRequired to trigger a login flow.
+   * In standalone mode, this stores the provided token or triggers onAuthRequired.
    *
    * @param mcpServerUrl - The MCP server URL to authenticate with
-   * @param tokenResponse - Optional: provide token response directly instead of using callbacks
+   * @param tokenResponse - Optional: provide token response directly (from OAuth popup)
    */
   async authenticate(
     mcpServerUrl: string,
     tokenResponse?: OAuthTokenResponse
   ): Promise<boolean> {
-    if (tokenResponse) {
-      this.cacheTokenResponse(mcpServerUrl, tokenResponse);
+    if (tokenResponse?.accessToken) {
+      this.storeOAuthToken(mcpServerUrl, tokenResponse);
       this.updateMcpAuthStatus(mcpServerUrl, 'connected');
       return true;
     }
-    const resolved = await this.resolveToken(mcpServerUrl);
-    if (!resolved) return false;
+
+    const token = await this.resolveToken(mcpServerUrl);
+    if (!token) return false;
+
     try {
       await this.initMcpSession(mcpServerUrl);
       return true;
@@ -267,124 +253,92 @@ export class EmcyAgent {
     this.listeners.get(event)?.forEach((handler) => handler(data));
   }
 
+  // ================================================================
+  // OAuth Token Storage (standalone mode only)
+  // ================================================================
+
   /** Generate a localStorage key for an MCP server URL */
-  private getStorageKey(mcpServerUrl: string): string {
-    // Simple hash to create a safe key from the URL
-    const hash = btoa(mcpServerUrl).replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
-    return `${EmcyAgent.STORAGE_PREFIX}${hash}`;
+  private hashUrl(url: string): string {
+    return btoa(url).replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
   }
 
-  /** Save token to both in-memory cache and localStorage */
-  private cacheToken(
-    mcpServerUrl: string,
-    accessToken: string,
-    expiresAt: number,
-    refreshToken?: string
-  ): void {
-    this.tokenCache.set(mcpServerUrl, { accessToken, refreshToken, expiresAt });
-
-    // Persist to localStorage for cross-refresh persistence
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(
-          this.getStorageKey(mcpServerUrl),
-          JSON.stringify({ accessToken, refreshToken, expiresAt, url: mcpServerUrl })
-        );
-      }
-    } catch {
-      // localStorage may be unavailable (SSR, private browsing, quota exceeded)
-    }
-  }
-
-  /** Cache an OAuthTokenResponse and return the access token */
-  private cacheTokenResponse(mcpServerUrl: string, tokenResponse: OAuthTokenResponse): string {
-    const expiresIn = tokenResponse.expiresIn ?? 3600;
-    const expiresAt = Date.now() + (expiresIn * 1000) - (5 * 60 * 1000); // 5 min buffer
-    this.cacheToken(mcpServerUrl, tokenResponse.accessToken, expiresAt, tokenResponse.refreshToken);
-    return tokenResponse.accessToken;
-  }
-
-  /** Load token from localStorage if available */
-  private loadTokenFromStorage(mcpServerUrl: string): {
+  /** Load OAuth token from localStorage */
+  private loadOAuthToken(mcpServerUrl: string): {
     accessToken: string;
     refreshToken?: string;
     expiresAt: number;
   } | null {
-    try {
-      if (typeof localStorage === 'undefined') return null;
-
-      const stored = localStorage.getItem(this.getStorageKey(mcpServerUrl));
-      if (!stored) return null;
-
-      const data = JSON.parse(stored) as {
-        accessToken?: string;
-        token?: string; // Legacy field name
-        refreshToken?: string;
-        expiresAt: number;
-      };
-
-      // Handle legacy storage format (token vs accessToken)
-      const accessToken = data.accessToken ?? data.token;
-      if (!accessToken) return null;
-
-      // If access token is expired but we have a refresh token, still return it
-      // so we can attempt a refresh
-      if (data.expiresAt <= Date.now() && !data.refreshToken) {
-        localStorage.removeItem(this.getStorageKey(mcpServerUrl));
-        return null;
-      }
-
-      return {
-        accessToken,
-        refreshToken: data.refreshToken,
-        expiresAt: data.expiresAt,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  /** Clear token from both in-memory cache and localStorage */
-  private clearToken(mcpServerUrl: string): void {
-    this.tokenCache.delete(mcpServerUrl);
+    const cached = this.oauthTokens.get(mcpServerUrl);
+    if (cached) return cached;
 
     try {
       if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(this.getStorageKey(mcpServerUrl));
+        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const data = JSON.parse(stored);
+          if (data.accessToken && data.expiresAt) {
+            this.oauthTokens.set(mcpServerUrl, data);
+            return data;
+          }
+        }
       }
-    } catch {
-      // Ignore storage errors
-    }
+    } catch { /* ignore */ }
+
+    return null;
   }
 
-  /**
-   * Attempt to refresh an access token using the stored refresh token.
-   * Returns the new access token on success, undefined on failure.
-   */
-  private async refreshAccessToken(mcpServerUrl: string): Promise<string | undefined> {
-    const cached = this.tokenCache.get(mcpServerUrl);
-    const stored = cached ?? this.loadTokenFromStorage(mcpServerUrl);
+  /** Check if we have a valid (non-expired) OAuth token */
+  private hasValidOAuthToken(mcpServerUrl: string): boolean {
+    const token = this.loadOAuthToken(mcpServerUrl);
+    if (!token) return false;
+    // Valid if not expired OR we have a refresh token
+    return token.expiresAt > Date.now() || !!token.refreshToken;
+  }
 
-    if (!stored?.refreshToken) {
-      return undefined;
-    }
+  /** Store OAuth token to memory and localStorage */
+  private storeOAuthToken(mcpServerUrl: string, tokenResponse: OAuthTokenResponse): void {
+    const expiresIn = tokenResponse.expiresIn ?? 3600;
+    const expiresAt = Date.now() + (expiresIn * 1000) - (60 * 1000); // 1 min buffer
+    const data = {
+      accessToken: tokenResponse.accessToken,
+      refreshToken: tokenResponse.refreshToken,
+      expiresAt,
+    };
+    this.oauthTokens.set(mcpServerUrl, data);
 
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
+        localStorage.setItem(key, JSON.stringify(data));
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** Clear OAuth token from memory and localStorage */
+  private clearOAuthToken(mcpServerUrl: string): void {
+    this.oauthTokens.delete(mcpServerUrl);
+
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
+        localStorage.removeItem(key);
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** Refresh OAuth token using refresh token */
+  private async refreshOAuthToken(mcpServerUrl: string, refreshToken: string): Promise<string | undefined> {
     const authConfig = this.getServerAuthConfig(mcpServerUrl);
     const tokenUrl = authConfig?.tokenUrl;
-
-    if (!tokenUrl) {
-      return undefined;
-    }
+    if (!tokenUrl) return undefined;
 
     try {
       const body = new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: stored.refreshToken,
+        refresh_token: refreshToken,
       });
-
-      if (authConfig?.clientId) {
-        body.set('client_id', authConfig.clientId);
-      }
+      if (authConfig?.clientId) body.set('client_id', authConfig.clientId);
 
       const response = await fetch(tokenUrl, {
         method: 'POST',
@@ -395,26 +349,74 @@ export class EmcyAgent {
       if (response.ok) {
         const data = await response.json();
         if (data.access_token) {
-          // Calculate expiration (default to 1 hour if not provided)
-          const expiresIn = data.expires_in ?? 3600;
-          const expiresAt = Date.now() + (expiresIn * 1000) - (5 * 60 * 1000); // 5 min buffer
-
-          // Use new refresh token if provided, otherwise keep the old one
-          const newRefreshToken = data.refresh_token ?? stored.refreshToken;
-
-          this.cacheToken(mcpServerUrl, data.access_token, expiresAt, newRefreshToken);
+          const tokenResponse: OAuthTokenResponse = {
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token ?? refreshToken,
+            expiresIn: data.expires_in,
+          };
+          this.storeOAuthToken(mcpServerUrl, tokenResponse);
           return data.access_token;
         }
       }
+    } catch { /* ignore */ }
 
-      // Refresh failed - clear tokens so user can re-authenticate
-      this.clearToken(mcpServerUrl);
-      return undefined;
-    } catch {
-      // Network error or other failure
+    return undefined;
+  }
+
+  // ================================================================
+  // Token Resolution
+  // ================================================================
+
+  /**
+   * Resolve the auth token for an MCP server.
+   * - Embed mode (getToken): Always calls getToken - no caching
+   * - OAuth mode: Checks stored token, refreshes if expired, triggers auth if needed
+   */
+  private async resolveToken(mcpServerUrl: string): Promise<string | undefined> {
+    // Embed mode: always call getToken - host app manages the session
+    if (this.config.getToken) {
+      const result = await this.config.getToken(mcpServerUrl);
+      if (typeof result === 'string') return result;
+      if (result?.accessToken) return result.accessToken;
       return undefined;
     }
+
+    // OAuth mode: check stored token with expiry
+    const stored = this.loadOAuthToken(mcpServerUrl);
+    if (stored) {
+      // Token not expired - use it
+      if (stored.expiresAt > Date.now()) {
+        return stored.accessToken;
+      }
+
+      // Token expired - try refresh if we have refresh token
+      if (stored.refreshToken) {
+        const refreshed = await this.refreshOAuthToken(mcpServerUrl, stored.refreshToken);
+        if (refreshed) return refreshed;
+      }
+
+      // Refresh failed or no refresh token - clear and re-auth
+      this.clearOAuthToken(mcpServerUrl);
+    }
+
+    // No valid token - trigger auth flow
+    if (this.config.onAuthRequired) {
+      const authConfig = this.getServerAuthConfig(mcpServerUrl);
+      if (authConfig) {
+        const tokenResponse = await this.config.onAuthRequired(mcpServerUrl, authConfig);
+        if (tokenResponse?.accessToken) {
+          this.storeOAuthToken(mcpServerUrl, tokenResponse);
+          return tokenResponse.accessToken;
+        }
+      }
+    }
+
+    return undefined;
   }
+
+  // ================================================================
+  // Chat Loop
+  // ================================================================
 
   /**
    * The core orchestration loop:
@@ -427,7 +429,6 @@ export class EmcyAgent {
     this.abortController = new AbortController();
     this.emit('thinking', true);
 
-    // First request: send user message (include client tools for LLM)
     const chatBody: Record<string, unknown> = {
       agentId: this.config.agentId,
       conversationId: this.conversationId,
@@ -441,7 +442,6 @@ export class EmcyAgent {
     }
     let response = await this.callChatApi(chatBody, 'chat');
 
-    // Process SSE stream — may loop if there are tool calls
     while (true) {
       const result = await this.processSseStream(response);
 
@@ -457,7 +457,6 @@ export class EmcyAgent {
           const toolResult = await this.executeTool(toolCall);
           const duration = Date.now() - startTime;
 
-          // Update the tool_call message in-place with completion data
           const toolCallMsg = this.messages.find(
             m => m.role === 'tool_call' && m.toolCallId === toolCall.toolCallId
           );
@@ -469,7 +468,6 @@ export class EmcyAgent {
 
           this.emit('tool_result', { toolCallId: toolCall.toolCallId, result: toolResult, duration });
 
-          // Add tool result indicator to messages
           const toolResultMsg: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'tool_result',
@@ -480,10 +478,8 @@ export class EmcyAgent {
           };
           this.messages.push(toolResultMsg);
 
-          // Emit thinking again while waiting for LLM to process tool result
           this.emit('thinking', true);
 
-          // Send tool result back to continue the conversation
           const toolResultBody: Record<string, unknown> = {
             conversationId: this.conversationId!,
             toolCallId: toolCall.toolCallId,
@@ -498,7 +494,6 @@ export class EmcyAgent {
           const duration = Date.now() - startTime;
           const errorMsg = err instanceof Error ? err.message : 'Tool execution failed';
 
-          // Update the tool_call message with error data
           const toolCallMsg = this.messages.find(
             m => m.role === 'tool_call' && m.toolCallId === toolCall.toolCallId
           );
@@ -510,8 +505,6 @@ export class EmcyAgent {
 
           this.emit('tool_error', { toolCallId: toolCall.toolCallId, error: errorMsg, duration });
 
-          // Send error as tool_result so the conversation history stays valid
-          // (Anthropic requires every tool_use to have a matching tool_result)
           const errorResult = `Error: ${errorMsg}`;
           const toolResultMsg: ChatMessage = {
             id: crypto.randomUUID(),
@@ -538,7 +531,6 @@ export class EmcyAgent {
             }
             response = await this.callChatApi(toolResultBody, 'chat/tool-result');
           } catch {
-            // If sending the error result also fails, break to avoid infinite loop
             this.emit('error', { code: 'tool_error', message: errorMsg });
             break;
           }
@@ -611,7 +603,6 @@ export class EmcyAgent {
           }
           lastToolCall = data;
 
-          // Add tool call indicator to messages with status tracking
           const toolCallMsg: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'tool_call',
@@ -653,7 +644,6 @@ export class EmcyAgent {
       }
     }
 
-    // Stream ended — check if there was a pending tool call
     if (lastToolCall) {
       if (assistantContent) {
         const assistantMsg: ChatMessage = {
@@ -669,7 +659,6 @@ export class EmcyAgent {
       return { type: 'tool_call', data: lastToolCall };
     }
 
-    // Stream ended without explicit message_end
     if (assistantContent) {
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -684,71 +673,9 @@ export class EmcyAgent {
     return { type: 'message_end' };
   }
 
-  /**
-   * Resolve the auth token for an MCP server.
-   * Priority: in-memory cache > localStorage > refresh token > getToken callback > onAuthRequired callback
-   */
-  private async resolveToken(mcpServerUrl: string): Promise<string | undefined> {
-    // 1. Check in-memory cache first (fastest)
-    const cached = this.tokenCache.get(mcpServerUrl);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.accessToken;
-    }
-
-    // 2. Check localStorage (survives page refresh)
-    const stored = this.loadTokenFromStorage(mcpServerUrl);
-    if (stored) {
-      // If access token is still valid, use it
-      if (stored.expiresAt > Date.now()) {
-        // Restore to in-memory cache for faster subsequent access
-        this.tokenCache.set(mcpServerUrl, stored);
-        return stored.accessToken;
-      }
-
-      // Access token expired but we have a refresh token - try to refresh
-      if (stored.refreshToken) {
-        // Restore to cache first so refreshAccessToken can find the refresh token
-        this.tokenCache.set(mcpServerUrl, stored);
-        const refreshedToken = await this.refreshAccessToken(mcpServerUrl);
-        if (refreshedToken) {
-          return refreshedToken;
-        }
-      }
-    }
-
-    // 3. Try refresh if we have a cached refresh token (might be from memory)
-    if (cached?.refreshToken) {
-      const refreshedToken = await this.refreshAccessToken(mcpServerUrl);
-      if (refreshedToken) {
-        return refreshedToken;
-      }
-    }
-
-    // 4. Embedded mode: host app provides token via getToken
-    if (this.config.getToken) {
-      const tokenResponse = await this.config.getToken(mcpServerUrl);
-      if (tokenResponse) {
-        const normalized =
-          typeof tokenResponse === 'string'
-            ? { accessToken: tokenResponse, expiresIn: 3600 }
-            : tokenResponse;
-        return this.cacheTokenResponse(mcpServerUrl, normalized);
-      }
-    }
-
-    // 5. Standalone mode: trigger auth flow via onAuthRequired
-    if (this.config.onAuthRequired) {
-      const authConfig = this.getServerAuthConfig(mcpServerUrl);
-      if (authConfig) {
-        const tokenResponse = await this.config.onAuthRequired(mcpServerUrl, authConfig);
-        if (tokenResponse) {
-          return this.cacheTokenResponse(mcpServerUrl, tokenResponse);
-        }
-      }
-    }
-
-    return undefined;
-  }
+  // ================================================================
+  // MCP Session Management
+  // ================================================================
 
   /** Build headers for MCP server requests */
   private getMcpHeaders(mcpServerUrl: string): Record<string, string> {
@@ -789,45 +716,12 @@ export class EmcyAgent {
     });
 
     if (initResponse.status === 401) {
-      // First, try to refresh the token if we have a refresh token
-      const refreshedToken = await this.refreshAccessToken(mcpServerUrl);
-      if (refreshedToken) {
-        headers['Authorization'] = `Bearer ${refreshedToken}`;
-        const retryWithRefresh = await fetch(mcpServerUrl, {
-          method: 'POST',
-          headers,
-          credentials: this.config.useCookies ? 'include' : 'omit',
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'initialize',
-            params: {
-              protocolVersion: '2025-03-26',
-              capabilities: {},
-              clientInfo: { name: 'emcy-agent-sdk', version: '0.1.0' },
-            },
-          }),
-        });
-        if (retryWithRefresh.ok) {
-          const sessionId = retryWithRefresh.headers.get('mcp-session-id');
-          this.mcpSessions.set(mcpServerUrl, { sessionId, authStatus: 'connected' });
-          this.updateMcpAuthStatus(mcpServerUrl, 'connected');
-          await retryWithRefresh.text().catch(() => {});
-          const notifyHeaders = this.getMcpHeaders(mcpServerUrl);
-          notifyHeaders['Authorization'] = `Bearer ${refreshedToken}`;
-          await fetch(mcpServerUrl, {
-            method: 'POST',
-            headers: notifyHeaders,
-            credentials: this.config.useCookies ? 'include' : 'omit',
-            body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-          });
-          return;
-        }
+      // Clear stored OAuth token (embed mode will just call getToken again)
+      if (!this.config.getToken) {
+        this.clearOAuthToken(mcpServerUrl);
       }
-
-      // Refresh failed or no refresh token - clear and try full auth flow
       this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
-      this.clearToken(mcpServerUrl);
+
       const freshToken = await this.resolveToken(mcpServerUrl);
       if (freshToken) {
         headers['Authorization'] = `Bearer ${freshToken}`;
@@ -846,26 +740,23 @@ export class EmcyAgent {
             },
           }),
         });
-        if (!retryResponse.ok) {
-          const errorText = await retryResponse.text().catch(() => 'MCP init error');
-          throw new Error(`MCP initialization failed (${retryResponse.status}): ${errorText}`);
+        if (retryResponse.ok) {
+          const sessionId = retryResponse.headers.get('mcp-session-id');
+          this.mcpSessions.set(mcpServerUrl, { sessionId, authStatus: 'connected' });
+          this.updateMcpAuthStatus(mcpServerUrl, 'connected');
+          await retryResponse.text().catch(() => {});
+          const notifyHeaders = this.getMcpHeaders(mcpServerUrl);
+          notifyHeaders['Authorization'] = `Bearer ${freshToken}`;
+          await fetch(mcpServerUrl, {
+            method: 'POST',
+            headers: notifyHeaders,
+            credentials: this.config.useCookies ? 'include' : 'omit',
+            body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+          });
+          return;
         }
-        const sessionId = retryResponse.headers.get('mcp-session-id');
-        this.mcpSessions.set(mcpServerUrl, { sessionId, authStatus: 'connected' });
-        this.updateMcpAuthStatus(mcpServerUrl, 'connected');
-        await retryResponse.text().catch(() => {});
-        const notifyHeaders = this.getMcpHeaders(mcpServerUrl);
-        notifyHeaders['Authorization'] = `Bearer ${freshToken}`;
-        await fetch(mcpServerUrl, {
-          method: 'POST',
-          headers: notifyHeaders,
-          credentials: this.config.useCookies ? 'include' : 'omit',
-          body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-        });
-        return;
       }
-      const errorText = await initResponse.text().catch(() => 'Authentication required');
-      throw new Error(`MCP initialization failed (401): ${errorText}`);
+      throw new Error('MCP initialization failed (401): Authentication required');
     }
 
     if (!initResponse.ok) {
@@ -896,7 +787,6 @@ export class EmcyAgent {
       this.mcpSessions.set(mcpServerUrl, { sessionId: null, authStatus });
     }
 
-    // Find the server name from config
     const serverInfo = this.agentConfig?.mcpServers?.find(s => s.url === mcpServerUrl);
     this.emit('mcp_auth_status', {
       mcpServerUrl,
@@ -927,8 +817,11 @@ export class EmcyAgent {
     return response.json();
   }
 
+  // ================================================================
+  // Tool Execution
+  // ================================================================
+
   private async executeTool(toolCall: SseToolCall): Promise<unknown> {
-    // Client tools: execute locally (source === 'client' or empty/missing mcpServerUrl)
     const isClientTool =
       toolCall.source === 'client' || !toolCall.mcpServerUrl;
 
@@ -983,43 +876,26 @@ export class EmcyAgent {
       });
     }
 
-    // 401 → try refresh token first, then full auth flow
+    // 401 → clear token and try fresh auth
     if (response.status === 401) {
-      // First, try to refresh the token
-      const refreshedToken = await this.refreshAccessToken(mcpServerUrl);
-      if (refreshedToken) {
-        const refreshHeaders = this.getMcpHeaders(mcpServerUrl);
-        refreshHeaders['Authorization'] = `Bearer ${refreshedToken}`;
+      if (!this.config.getToken) {
+        this.clearOAuthToken(mcpServerUrl);
+      }
+      this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
+
+      const freshToken = await this.resolveToken(mcpServerUrl);
+      if (freshToken) {
+        const authHeaders = this.getMcpHeaders(mcpServerUrl);
+        authHeaders['Authorization'] = `Bearer ${freshToken}`;
         response = await fetch(mcpServerUrl, {
           method: 'POST',
-          headers: refreshHeaders,
+          headers: authHeaders,
           credentials: this.config.useCookies ? 'include' : 'omit',
           body: toolCallBody,
           signal: this.abortController?.signal,
         });
         if (response.ok) {
           this.updateMcpAuthStatus(mcpServerUrl, 'connected');
-        }
-      }
-
-      // If refresh didn't work, clear and try full auth flow
-      if (!response.ok) {
-        this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
-        this.clearToken(mcpServerUrl);
-        const freshToken = await this.resolveToken(mcpServerUrl);
-        if (freshToken) {
-          const authHeaders = this.getMcpHeaders(mcpServerUrl);
-          authHeaders['Authorization'] = `Bearer ${freshToken}`;
-          response = await fetch(mcpServerUrl, {
-            method: 'POST',
-            headers: authHeaders,
-            credentials: this.config.useCookies ? 'include' : 'omit',
-            body: toolCallBody,
-            signal: this.abortController?.signal,
-          });
-          if (response.ok) {
-            this.updateMcpAuthStatus(mcpServerUrl, 'connected');
-          }
         }
       }
 

@@ -146,14 +146,6 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     agent.init().then((initConfig) => {
       setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
-      // Proactive auth: when getToken is provided, try to authenticate needs_auth servers in background
-      if (config.getToken) {
-        for (const server of agent.getMcpServers()) {
-          if (server.authStatus === 'needs_auth') {
-            agent.authenticate(server.url).catch(() => {});
-          }
-        }
-      }
     }).catch(() => {});
 
     return () => {

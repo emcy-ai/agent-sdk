@@ -77,12 +77,54 @@ await agent.sendMessage("Hello!");
 | `apiKey`          | `string`                             | Emcy API key                                      |
 | `agentId`         | `string`                             | Agent ID from dashboard                           |
 | `agentServiceUrl` | `string`                             | Emcy API URL (default: `https://api.emcy.ai`)     |
-| `getToken`        | `() => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. Can return a plain access token string or `{ accessToken, refreshToken?, expiresIn? }`. |
+| `getToken`        | `(mcpServerUrl?: string) => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. See [Authentication](#authentication). |
 | `useCookies`      | `boolean`                            | Send cookies with MCP requests (default: `false`) |
 | `externalUserId`  | `string`                             | Optional user ID for conversations                |
 | `context`         | `Record<string, unknown>`            | Extra context sent with each message              |
 
-**Embedded vs standalone auth:** When you provide `getToken` (embedded mode), the SDK uses your app's session for MCP auth. It proactively authenticates `needs_auth` servers on init, and "Needs Auth" clicks trigger `getToken` instead of an OAuth popup. Without `getToken` (standalone mode), "Needs Auth" opens an OAuth popup and uses `onAuthRequired` for login flows.
+---
+
+## Authentication
+
+The SDK supports two authentication modes for MCP server calls:
+
+### Embedded mode (`getToken`)
+
+Use this when your app already has a user session. The SDK calls your `getToken` function **every time** it needs a token — no caching, no refresh logic. Your app is responsible for session management.
+
+```tsx
+<EmcyChat
+  apiKey="..."
+  agentId="..."
+  getToken={async (mcpServerUrl) => {
+    // Return token from your session
+    // Called every time a token is needed
+    return session?.accessToken;
+  }}
+/>
+```
+
+The `mcpServerUrl` parameter lets you return different tokens for different MCP servers in the same workspace.
+
+**Key behavior:**
+- `getToken` is called on every tool execution
+- No SDK-side token caching — your app manages refresh
+- Return a string (access token) or `{ accessToken, refreshToken?, expiresIn? }`
+- On 401, the SDK calls `getToken` again for a fresh token
+
+### Standalone mode (OAuth popup)
+
+When `getToken` is not provided, the SDK handles auth via built-in OAuth popup. Clicking "Needs Auth" on an MCP server opens the OAuth flow automatically. The SDK stores tokens with expiry and handles refresh.
+
+**Key behavior:**
+- SDK stores tokens in memory and localStorage
+- Checks token expiry before each use
+- Automatically refreshes using `refreshToken` if expired
+- Opens OAuth popup when no valid token exists
+
+### Multiple MCP servers
+
+Both modes support multiple MCP servers per workspace. The `mcpServerUrl` parameter identifies which server needs authentication, allowing you to return different tokens per server.
 
 ---
 

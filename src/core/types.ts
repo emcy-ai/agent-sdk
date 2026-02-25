@@ -34,22 +34,23 @@ export interface EmcyAgentConfig {
 
   /**
    * Callback to get the user's auth token for MCP server calls.
-   * Called before each tool execution. Receives the MCP server URL
+   * Called every time a token is needed. Receives the MCP server URL
    * so you can return different tokens per server.
    * If using cookies, return undefined and set `useCookies: true`.
    *
    * In embedded mode, the host app provides this to supply tokens
-   * from its own auth system. Include refreshToken for automatic renewal.
+   * from its own auth system. The SDK does NOT cache tokens - it calls
+   * this function every time, so your app manages token refresh.
    */
   getToken?: (mcpServerUrl?: string) => Promise<OAuthTokenResponse | string | undefined>;
 
   /**
    * Called when an MCP server requires authentication and no `getToken`
    * callback is provided (standalone mode). The SDK will invoke this
-   * so the integrator can trigger a login flow.
+   * so the integrator can trigger a login flow (e.g., OAuth popup).
    *
    * Return the token response on success, or undefined to cancel.
-   * Include refreshToken for automatic renewal.
+   * The SDK stores the token and handles refresh automatically.
    */
   onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse | undefined>;
 
