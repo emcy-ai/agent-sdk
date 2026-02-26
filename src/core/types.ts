@@ -33,6 +33,14 @@ export interface EmcyAgentConfig {
   agentServiceUrl?: string;
 
   /**
+   * Callback to get the auth token for Emcy API requests.
+   * If provided, called before each chat API request.
+   * Use this when your session token may expire and needs refresh (e.g., dashboard playground).
+   * If not provided, uses the static `apiKey` value.
+   */
+  getAuthToken?: () => Promise<string | undefined>;
+
+  /**
    * Callback to get the user's auth token for MCP server calls.
    * Called every time a token is needed. Receives the MCP server URL
    * so you can return different tokens per server.

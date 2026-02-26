@@ -76,13 +76,22 @@ export class EmcyAgent {
     };
   }
 
+  private async resolveAuthToken(): Promise<string> {
+    if (this.config.getAuthToken) {
+      const token = await this.config.getAuthToken();
+      if (token) return token;
+    }
+    return this.config.apiKey;
+  }
+
   /** Initialize: fetch workspace config (tools, widget settings, MCP servers) */
   async init(): Promise<AgentConfigResponse> {
+    const token = await this.resolveAuthToken();
     const response = await fetch(
       `${this.config.agentServiceUrl}/api/v1/workspaces/${this.config.agentId}/config`,
       {
         headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
       },
     );
@@ -549,13 +558,14 @@ export class EmcyAgent {
   }
 
   private async callChatApi(body: unknown, endpoint: string): Promise<Response> {
+    const token = await this.resolveAuthToken();
     const response = await fetch(
       `${this.config.agentServiceUrl}/api/v1/${endpoint}`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(body),
         signal: this.abortController?.signal,
