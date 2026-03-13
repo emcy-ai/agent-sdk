@@ -90,6 +90,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
   content: string;
   toolName?: string;
+  toolLabel?: string;
   toolCallId?: string;
   timestamp: Date;
   toolCallStatus?: 'calling' | 'completed' | 'error';
@@ -160,6 +161,7 @@ export interface SseContentDelta {
 export interface SseToolCall {
   toolCallId: string;
   toolName: string;
+  toolLabel?: string;
   arguments: Record<string, unknown>;
   mcpServerUrl?: string;
   mcpServerName?: string;

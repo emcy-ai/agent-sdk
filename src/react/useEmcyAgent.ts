@@ -60,8 +60,9 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
         {
           id: crypto.randomUUID(),
           role: 'tool_call' as const,
-          content: `Calling ${tc.toolName}...`,
+          content: `Calling ${tc.toolLabel ?? tc.toolName}...`,
           toolName: tc.toolName,
+          toolLabel: tc.toolLabel,
           toolCallId: tc.toolCallId,
           timestamp: new Date(),
           toolCallStatus: 'calling' as const,

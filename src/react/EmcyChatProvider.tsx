@@ -69,8 +69,9 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         {
           id: crypto.randomUUID(),
           role: 'tool_call' as const,
-          content: `Calling ${tc.toolName}...`,
+          content: `Calling ${tc.toolLabel ?? tc.toolName}...`,
           toolName: tc.toolName,
+          toolLabel: tc.toolLabel,
           toolCallId: tc.toolCallId,
           timestamp: new Date(),
           toolCallStatus: 'calling' as const,

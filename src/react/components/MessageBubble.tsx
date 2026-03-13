@@ -27,7 +27,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     case 'tool_call':
       return (
         <EnhancedToolCallCard
-          toolName={message.toolName ?? 'Unknown Tool'}
+          toolName={message.toolLabel ?? message.toolName ?? 'Unknown Tool'}
           toolCallId={message.toolCallId ?? ''}
           status={message.toolCallStatus ?? 'calling'}
           startTime={message.toolCallStartTime ?? Date.now()}

@@ -621,8 +621,9 @@ export class EmcyAgent {
           const toolCallMsg: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'tool_call',
-            content: `Calling ${data.toolName}...`,
+            content: `Calling ${data.toolLabel ?? data.toolName}...`,
             toolName: data.toolName,
+            toolLabel: data.toolLabel,
             toolCallId: data.toolCallId,
             timestamp: new Date(),
             toolCallStatus: 'calling',
