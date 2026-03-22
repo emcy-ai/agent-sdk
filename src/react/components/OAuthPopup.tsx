@@ -104,6 +104,8 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const codeVerifierRef = useRef<string>('');
   const stateRef = useRef<string>('');
+  const callbackUrl = authConfig.callbackUrl ?? `${window.location.origin}/oauth/callback`;
+  const callbackOrigin = new URL(callbackUrl).origin;
 
   const cleanup = useCallback(() => {
     if (pollTimerRef.current) {
@@ -117,6 +119,18 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      if (event.origin !== callbackOrigin) {
+        return;
+      }
+
+      if (!event.data || typeof event.data !== 'object') {
+        return;
+      }
+
+      if (!stateRef.current || event.data.state !== stateRef.current) {
+        return;
+      }
+
       // Legacy: simple token string
       if (event.data?.type === 'emcy-oauth-callback' && event.data?.token) {
         cleanup();
@@ -145,7 +159,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
   }, [cleanup, onToken]);
 
   const exchangeCodeForToken = async (code: string) => {
-    const tokenUrl = authConfig.tokenUrl;
+    const tokenUrl = authConfig.tokenEndpoint ?? authConfig.tokenUrl;
     if (!tokenUrl) return;
 
     try {
@@ -153,7 +167,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         grant_type: 'authorization_code',
         code,
         code_verifier: codeVerifierRef.current,
-        redirect_uri: `${window.location.origin}/oauth/callback`,
+        redirect_uri: callbackUrl,
       });
       if (authConfig.clientId) {
         body.set('client_id', authConfig.clientId);
@@ -184,7 +198,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
   };
 
   const handleSignIn = async () => {
-    const loginUrl = authConfig.loginUrl;
+    const loginUrl = authConfig.authorizationEndpoint ?? authConfig.loginUrl;
     if (!loginUrl) {
       onClose();
       return;
@@ -197,14 +211,14 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
 
     let authUrl: string;
 
-    if (authConfig.tokenUrl) {
+    if (authConfig.tokenEndpoint ?? authConfig.tokenUrl) {
       const codeChallenge = await generateCodeChallenge(codeVerifier);
       const params = new URLSearchParams({
         response_type: 'code',
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
         state,
-        redirect_uri: `${window.location.origin}/oauth/callback`,
+        redirect_uri: callbackUrl,
       });
       if (authConfig.clientId) {
         params.set('client_id', authConfig.clientId);
@@ -217,7 +231,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       // Simple login page flow - the app's login page will post back the token
       const params = new URLSearchParams({
         state,
-        redirect_uri: `${window.location.origin}/oauth/callback`,
+        redirect_uri: callbackUrl,
         mode: 'popup',
       });
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
@@ -228,9 +242,14 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
+    const popupContext = encodeURIComponent(JSON.stringify({
+      openerOrigin: window.location.origin,
+      expectedState: state,
+    }));
+
     popupWindowRef.current = window.open(
       authUrl,
-      `emcy-auth-${serverUrl}`,
+      `emcy-auth:${popupContext}`,
       `width=${width},height=${height},left=${left},top=${top},popup=true`,
     );
 

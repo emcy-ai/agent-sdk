@@ -33,6 +33,13 @@ export interface EmcyAgentConfig {
   agentServiceUrl?: string;
 
   /**
+   * Callback URL used by the standalone popup OAuth flow.
+   * Defaults to the hosted Emcy callback page so downstream auth servers
+   * only need to allow a single redirect URI.
+   */
+  oauthCallbackUrl?: string;
+
+  /**
    * Callback to get the auth token for Emcy API requests.
    * If provided, called before each chat API request.
    * Use this when your session token may expire and needs refresh (e.g., dashboard playground).
@@ -106,11 +113,17 @@ export interface ChatMessage {
 
 export interface McpServerAuthConfig {
   authType: 'none' | 'apiKey' | 'bearer' | 'oauth2';
+  issuer?: string;
   authorizationServerUrl?: string;
+  authorizationEndpoint?: string;
   loginUrl?: string;
+  tokenEndpoint?: string;
   tokenUrl?: string;
   clientId?: string;
   scopes?: string[];
+  callbackUrl?: string;
+  protectedResourceMetadataUrl?: string;
+  discovered?: boolean;
 }
 
 /** OAuth token response from token endpoint */

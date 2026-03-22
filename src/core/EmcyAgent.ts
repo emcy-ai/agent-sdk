@@ -17,6 +17,23 @@ import type {
 
 type EventHandler<T> = (data: T) => void;
 
+type ProtectedResourceMetadata = {
+  resource?: string;
+  authorization_servers?: string[];
+  authorization_server?: string;
+  scopes_supported?: string[];
+};
+
+type AuthorizationServerMetadata = {
+  issuer?: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  scopes_supported?: string[];
+};
+
+const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
+const DEFAULT_OAUTH_CALLBACK_URL = 'https://app.emcy.ai/oauth/callback';
+
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
   const properties: Record<string, object> = {};
@@ -73,6 +90,7 @@ export class EmcyAgent {
     this.config = {
       ...config,
       agentServiceUrl: config.agentServiceUrl ?? 'https://api.emcy.ai',
+      oauthCallbackUrl: config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL,
     };
   }
 
@@ -102,6 +120,14 @@ export class EmcyAgent {
     }
 
     this.agentConfig = await response.json();
+
+    if (this.agentConfig?.mcpServers?.length) {
+      await Promise.all(
+        this.agentConfig.mcpServers.map(async (server) => {
+          server.authConfig = await this.resolveServerAuthConfig(server.url, server.authConfig ?? null);
+        }),
+      );
+    }
 
     // Pre-initialize session tracking for each MCP server
     if (this.agentConfig?.mcpServers) {
@@ -246,6 +272,10 @@ export class EmcyAgent {
     return server?.authConfig ?? null;
   }
 
+  private getOAuthCallbackUrl(): string {
+    return this.config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL;
+  }
+
   /** Subscribe to events */
   on<K extends EmcyAgentEvent>(event: K, handler: EventHandler<EmcyAgentEventMap[K]>): void {
     if (!this.listeners.has(event)) {
@@ -262,6 +292,166 @@ export class EmcyAgent {
   // ================================================================
   // Private methods
   // ================================================================
+
+  private buildProtectedResourceMetadataCandidates(mcpServerUrl: string): string[] {
+    const url = new URL(mcpServerUrl);
+    const candidates = new Set<string>();
+    const normalizedPath = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+
+    if (!normalizedPath || normalizedPath === '/') {
+      candidates.add(`${url.origin}/.well-known/oauth-protected-resource`);
+      return [...candidates];
+    }
+
+    candidates.add(`${url.origin}/.well-known/oauth-protected-resource${normalizedPath}`);
+    candidates.add(`${url.origin}${normalizedPath}/.well-known/oauth-protected-resource`);
+    candidates.add(`${url.origin}/.well-known/oauth-protected-resource`);
+    return [...candidates];
+  }
+
+  private extractQuotedHeaderValue(header: string, key: string): string | null {
+    const match = header.match(new RegExp(`${key}="([^"]+)"`, 'i'));
+    return match?.[1] ?? null;
+  }
+
+  private getAuthorizationServerMetadataUrl(issuerOrMetadataUrl: string): string {
+    if (issuerOrMetadataUrl.includes('/.well-known/oauth-authorization-server')) {
+      return issuerOrMetadataUrl;
+    }
+    const url = new URL(issuerOrMetadataUrl);
+    const normalizedPath = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    if (!normalizedPath || normalizedPath === '/') {
+      return `${url.origin}/.well-known/oauth-authorization-server`;
+    }
+    return `${url.origin}/.well-known/oauth-authorization-server${normalizedPath}`;
+  }
+
+  private mergeAuthConfigs(
+    manualConfig: McpServerAuthConfig | null | undefined,
+    discoveredConfig: McpServerAuthConfig | null | undefined,
+  ): McpServerAuthConfig | null {
+    if (!manualConfig && !discoveredConfig) return null;
+
+    const merged: McpServerAuthConfig = {
+      authType: manualConfig?.authType ?? discoveredConfig?.authType ?? 'oauth2',
+      issuer: manualConfig?.issuer ?? discoveredConfig?.issuer,
+      authorizationServerUrl: manualConfig?.authorizationServerUrl ?? discoveredConfig?.authorizationServerUrl,
+      authorizationEndpoint: manualConfig?.authorizationEndpoint ?? manualConfig?.loginUrl ?? discoveredConfig?.authorizationEndpoint ?? discoveredConfig?.loginUrl,
+      loginUrl: manualConfig?.loginUrl ?? manualConfig?.authorizationEndpoint ?? discoveredConfig?.loginUrl ?? discoveredConfig?.authorizationEndpoint,
+      tokenEndpoint: manualConfig?.tokenEndpoint ?? manualConfig?.tokenUrl ?? discoveredConfig?.tokenEndpoint ?? discoveredConfig?.tokenUrl,
+      tokenUrl: manualConfig?.tokenUrl ?? manualConfig?.tokenEndpoint ?? discoveredConfig?.tokenUrl ?? discoveredConfig?.tokenEndpoint,
+      clientId: manualConfig?.clientId ?? discoveredConfig?.clientId,
+      scopes: manualConfig?.scopes?.length ? manualConfig.scopes : discoveredConfig?.scopes,
+      callbackUrl: this.getOAuthCallbackUrl(),
+      protectedResourceMetadataUrl:
+        manualConfig?.protectedResourceMetadataUrl ?? discoveredConfig?.protectedResourceMetadataUrl,
+      discovered: discoveredConfig?.discovered ?? false,
+    };
+
+    return merged;
+  }
+
+  private async discoverAuthConfig(mcpServerUrl: string): Promise<McpServerAuthConfig | null> {
+    let protectedResourceUrl: string | null = null;
+    let protectedResource: ProtectedResourceMetadata | null = null;
+
+    for (const candidate of this.buildProtectedResourceMetadataCandidates(mcpServerUrl)) {
+      try {
+        const response = await fetch(candidate, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+
+        if (response.ok) {
+          protectedResource = await response.json();
+          protectedResourceUrl = candidate;
+          break;
+        }
+
+        const authenticateHeader = response.headers.get('www-authenticate');
+        if (authenticateHeader) {
+          const resourceMetadataUrl = this.extractQuotedHeaderValue(authenticateHeader, 'resource_metadata');
+          if (resourceMetadataUrl) {
+            const metadataResponse = await fetch(resourceMetadataUrl, {
+              method: 'GET',
+              headers: { Accept: 'application/json' },
+            });
+            if (metadataResponse.ok) {
+              protectedResource = await metadataResponse.json();
+              protectedResourceUrl = resourceMetadataUrl;
+              break;
+            }
+          }
+        }
+      } catch {
+        // Try the next candidate.
+      }
+    }
+
+    if (!protectedResource) {
+      return null;
+    }
+
+    const authServerUrl =
+      protectedResource.authorization_servers?.[0] ??
+      protectedResource.authorization_server;
+
+    if (!authServerUrl) {
+      return null;
+    }
+
+    try {
+      const metadataUrl = this.getAuthorizationServerMetadataUrl(authServerUrl);
+      const response = await fetch(metadataUrl, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+
+      const metadata = (await response.json()) as AuthorizationServerMetadata;
+      return {
+        authType: 'oauth2',
+        issuer: metadata.issuer ?? authServerUrl,
+        authorizationServerUrl: authServerUrl,
+        authorizationEndpoint: metadata.authorization_endpoint,
+        loginUrl: metadata.authorization_endpoint,
+        tokenEndpoint: metadata.token_endpoint,
+        tokenUrl: metadata.token_endpoint,
+        scopes: protectedResource.scopes_supported?.length
+          ? protectedResource.scopes_supported
+          : metadata.scopes_supported,
+        callbackUrl: this.getOAuthCallbackUrl(),
+        protectedResourceMetadataUrl: protectedResourceUrl ?? undefined,
+        discovered: true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveServerAuthConfig(
+    mcpServerUrl: string,
+    manualConfig: McpServerAuthConfig | null | undefined,
+  ): Promise<McpServerAuthConfig | null> {
+    const discoveredConfig = await this.discoverAuthConfig(mcpServerUrl);
+    return this.mergeAuthConfigs(manualConfig, discoveredConfig);
+  }
+
+  private async ensureServerAuthConfig(mcpServerUrl: string): Promise<McpServerAuthConfig | null> {
+    const server = this.agentConfig?.mcpServers?.find((item) => item.url === mcpServerUrl);
+    if (!server) {
+      return null;
+    }
+
+    if (server.authConfig?.authorizationEndpoint || server.authConfig?.tokenEndpoint || server.authConfig?.tokenUrl) {
+      return server.authConfig;
+    }
+
+    server.authConfig = await this.resolveServerAuthConfig(mcpServerUrl, server.authConfig ?? null);
+    return server.authConfig;
+  }
 
   private emit<K extends EmcyAgentEvent>(event: K, data: EmcyAgentEventMap[K]): void {
     this.listeners.get(event)?.forEach((handler) => handler(data));
@@ -343,8 +533,8 @@ export class EmcyAgent {
 
   /** Refresh OAuth token using refresh token */
   private async refreshOAuthToken(mcpServerUrl: string, refreshToken: string): Promise<string | undefined> {
-    const authConfig = this.getServerAuthConfig(mcpServerUrl);
-    const tokenUrl = authConfig?.tokenUrl;
+    const authConfig = await this.ensureServerAuthConfig(mcpServerUrl);
+    const tokenUrl = authConfig?.tokenEndpoint ?? authConfig?.tokenUrl;
     if (!tokenUrl) return undefined;
 
     try {
@@ -415,7 +605,7 @@ export class EmcyAgent {
 
     // No valid token - trigger auth flow
     if (this.config.onAuthRequired) {
-      const authConfig = this.getServerAuthConfig(mcpServerUrl);
+      const authConfig = await this.ensureServerAuthConfig(mcpServerUrl);
       if (authConfig) {
         const tokenResponse = await this.config.onAuthRequired(mcpServerUrl, authConfig);
         if (tokenResponse?.accessToken) {
@@ -712,23 +902,26 @@ export class EmcyAgent {
     if (session?.sessionId) return;
 
     const headers = this.getMcpHeaders(mcpServerUrl);
+    await this.ensureServerAuthConfig(mcpServerUrl);
     const token = await this.resolveToken(mcpServerUrl);
     if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const initPayload = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: DEFAULT_MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: 'emcy-agent-sdk', version: '0.1.0' },
+      },
+    });
 
     const initResponse = await fetch(mcpServerUrl, {
       method: 'POST',
       headers,
       credentials: this.config.useCookies ? 'include' : 'omit',
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-03-26',
-          capabilities: {},
-          clientInfo: { name: 'emcy-agent-sdk', version: '0.1.0' },
-        },
-      }),
+      body: initPayload,
     });
 
     if (initResponse.status === 401) {
@@ -745,16 +938,7 @@ export class EmcyAgent {
           method: 'POST',
           headers,
           credentials: this.config.useCookies ? 'include' : 'omit',
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'initialize',
-            params: {
-              protocolVersion: '2025-03-26',
-              capabilities: {},
-              clientInfo: { name: 'emcy-agent-sdk', version: '0.1.0' },
-            },
-          }),
+          body: initPayload,
         });
         if (retryResponse.ok) {
           const sessionId = retryResponse.headers.get('mcp-session-id');
