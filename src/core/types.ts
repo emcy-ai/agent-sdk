@@ -40,6 +40,12 @@ export interface EmcyAgentConfig {
   oauthCallbackUrl?: string;
 
   /**
+   * Public URL for this client's hosted metadata document when using
+   * Client ID Metadata Documents (CIMD).
+   */
+  oauthClientMetadataUrl?: string;
+
+  /**
    * Callback to get the auth token for Emcy API requests.
    * If provided, called before each chat API request.
    * Use this when your session token may expire and needs refresh (e.g., dashboard playground).
@@ -115,15 +121,118 @@ export interface McpServerAuthConfig {
   authType: 'none' | 'apiKey' | 'bearer' | 'oauth2';
   issuer?: string;
   authorizationServerUrl?: string;
+  authorizationServerMetadataUrl?: string;
   authorizationEndpoint?: string;
   loginUrl?: string;
   tokenEndpoint?: string;
   tokenUrl?: string;
+  registrationEndpoint?: string;
   clientId?: string;
   scopes?: string[];
+  resource?: string;
   callbackUrl?: string;
   protectedResourceMetadataUrl?: string;
+  clientIdMetadataDocumentSupported?: boolean;
+  resourceParameterSupported?: boolean;
+  registrationPreference?: McpClientRegistrationPreference;
+  clientMode?: McpResolvedClientMode;
+  authRecipe?: McpAuthRecipe;
+  manualOverrides?: string[];
   discovered?: boolean;
+}
+
+export type McpAuthRecipe =
+  | 'sqlos'
+  | 'auth0'
+  | 'entra'
+  | 'workos'
+  | 'manual';
+
+export type McpClientRegistrationPreference =
+  | 'auto'
+  | 'preregistered'
+  | 'cimd'
+  | 'dcr'
+  | 'manual';
+
+export type McpResolvedClientMode =
+  | 'preregistered'
+  | 'cimd'
+  | 'dcr'
+  | 'manual';
+
+export interface ProtectedResourceMetadata {
+  resource?: string;
+  authorization_servers?: string[];
+  authorization_server?: string;
+  scopes_supported?: string[];
+  bearer_methods_supported?: string[];
+  resource_documentation?: string;
+}
+
+export interface AuthorizationServerMetadata {
+  issuer?: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  registration_endpoint?: string;
+  scopes_supported?: string[];
+  code_challenge_methods_supported?: string[];
+  response_types_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+  grant_types_supported?: string[];
+  client_id_metadata_document_supported?: boolean;
+  resource_parameter_supported?: boolean;
+}
+
+export interface OAuthDynamicClientRegistrationRequest {
+  client_name: string;
+  application_type: 'web';
+  redirect_uris: string[];
+  grant_types: string[];
+  response_types: string[];
+  token_endpoint_auth_method: 'none';
+  scope?: string;
+  client_uri?: string;
+  logo_uri?: string;
+  policy_uri?: string;
+  tos_uri?: string;
+}
+
+export interface OAuthDynamicClientRegistrationResponse {
+  client_id: string;
+  client_name?: string;
+  redirect_uris?: string[];
+  grant_types?: string[];
+  response_types?: string[];
+  token_endpoint_auth_method?: string;
+  client_id_issued_at?: number;
+  [key: string]: unknown;
+}
+
+export interface StoredOAuthRegistration {
+  key: string;
+  mode: McpResolvedClientMode;
+  authorizationServerUrl: string;
+  authorizationServerMetadataUrl?: string;
+  registrationEndpoint?: string;
+  clientId: string;
+  callbackUrl: string;
+  resource?: string;
+  clientMetadataUrl?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ResolvedOAuthRegistration {
+  cacheKey: string;
+  mode: McpResolvedClientMode;
+  clientId?: string;
+  callbackUrl: string;
+  resource?: string;
+  authorizationServerUrl?: string;
+  authorizationServerMetadataUrl?: string;
+  registrationEndpoint?: string;
+  clientMetadataUrl?: string;
 }
 
 /** OAuth token response from token endpoint */
@@ -132,6 +241,7 @@ export interface OAuthTokenResponse {
   refreshToken?: string;
   expiresIn?: number;
   tokenType?: string;
+  resolvedAuthConfig?: McpServerAuthConfig;
 }
 
 export interface McpServerInfo {

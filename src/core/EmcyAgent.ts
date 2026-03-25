@@ -1,38 +1,35 @@
 import { parseSseStream } from './sse-client';
 import type {
-  ClientToolParameter,
-  EmcyAgentConfig,
   AgentConfigResponse,
+  AuthorizationServerMetadata,
   ChatMessage,
+  ClientToolParameter,
   EmcyAgentEvent,
   EmcyAgentEventMap,
+  EmcyAgentConfig,
   SseContentDelta,
-  SseToolCall,
-  SseMessageEnd,
-  SseMessageStart,
-  SseError,
   McpServerAuthConfig,
   OAuthTokenResponse,
+  ProtectedResourceMetadata,
+  SseError,
+  SseMessageEnd,
+  SseMessageStart,
+  SseToolCall,
 } from './types';
+import {
+  applyResolvedRegistration,
+  buildRegistrationCacheKey,
+  buildTokenCacheKey,
+  getEffectiveCallbackUrl,
+  loadStoredRegistration,
+  resolveOAuthRegistration,
+} from './auth/registration';
 
 type EventHandler<T> = (data: T) => void;
 
-type ProtectedResourceMetadata = {
-  resource?: string;
-  authorization_servers?: string[];
-  authorization_server?: string;
-  scopes_supported?: string[];
-};
-
-type AuthorizationServerMetadata = {
-  issuer?: string;
-  authorization_endpoint?: string;
-  token_endpoint?: string;
-  scopes_supported?: string[];
-};
-
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
-const DEFAULT_OAUTH_CALLBACK_URL = 'https://app.emcy.ai/oauth/callback';
+const DEFAULT_OAUTH_CALLBACK_URL = 'https://emcy.ai/oauth/callback';
+const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
 
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
@@ -91,6 +88,8 @@ export class EmcyAgent {
       ...config,
       agentServiceUrl: config.agentServiceUrl ?? 'https://api.emcy.ai',
       oauthCallbackUrl: config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL,
+      oauthClientMetadataUrl:
+        config.oauthClientMetadataUrl ?? DEFAULT_OAUTH_CLIENT_METADATA_URL,
     };
   }
 
@@ -249,6 +248,9 @@ export class EmcyAgent {
     tokenResponse?: OAuthTokenResponse
   ): Promise<boolean> {
     if (tokenResponse?.accessToken) {
+      if (tokenResponse.resolvedAuthConfig) {
+        this.updateServerAuthConfig(mcpServerUrl, tokenResponse.resolvedAuthConfig);
+      }
       this.storeOAuthToken(mcpServerUrl, tokenResponse);
       this.updateMcpAuthStatus(mcpServerUrl, 'connected');
       return true;
@@ -274,6 +276,23 @@ export class EmcyAgent {
 
   private getOAuthCallbackUrl(): string {
     return this.config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL;
+  }
+
+  private async resolveOAuthClientRegistration(
+    authConfig: McpServerAuthConfig | null | undefined,
+  ): Promise<McpServerAuthConfig | null> {
+    if (!authConfig || authConfig.authType !== 'oauth2') {
+      return authConfig ?? null;
+    }
+
+    const registration = await resolveOAuthRegistration(authConfig, {
+      callbackUrl: this.getOAuthCallbackUrl(),
+      oauthClientMetadataUrl: this.config.oauthClientMetadataUrl,
+      clientName: 'Emcy MCP Client',
+      clientUri: 'https://emcy.ai',
+    });
+
+    return applyResolvedRegistration(authConfig, registration);
   }
 
   /** Subscribe to events */
@@ -326,36 +345,152 @@ export class EmcyAgent {
     return `${url.origin}/.well-known/oauth-authorization-server${normalizedPath}`;
   }
 
+  private hasExplicitManualOverride(
+    manualConfig: McpServerAuthConfig | null | undefined,
+    field: string,
+  ): boolean {
+    return manualConfig?.manualOverrides?.includes(field) ?? false;
+  }
+
+  private pickAuthConfigValue<T>(
+    field: string,
+    manualConfig: McpServerAuthConfig | null | undefined,
+    manualValue: T | undefined,
+    discoveredValue: T | undefined,
+  ): T | undefined {
+    if (this.hasExplicitManualOverride(manualConfig, field) && manualValue != null) {
+      return manualValue;
+    }
+
+    return discoveredValue ?? manualValue;
+  }
+
+  private pickAuthConfigArrayValue<T>(
+    field: string,
+    manualConfig: McpServerAuthConfig | null | undefined,
+    manualValue: T[] | undefined,
+    discoveredValue: T[] | undefined,
+  ): T[] | undefined {
+    if (this.hasExplicitManualOverride(manualConfig, field) && manualValue?.length) {
+      return manualValue;
+    }
+
+    if (discoveredValue?.length) {
+      return discoveredValue;
+    }
+
+    return manualValue?.length ? manualValue : undefined;
+  }
+
   private mergeAuthConfigs(
     manualConfig: McpServerAuthConfig | null | undefined,
     discoveredConfig: McpServerAuthConfig | null | undefined,
   ): McpServerAuthConfig | null {
     if (!manualConfig && !discoveredConfig) return null;
 
+    const manualOverrides = new Set<string>(manualConfig?.manualOverrides ?? []);
+    const authorizationEndpoint = this.pickAuthConfigValue(
+      'authorizationEndpoint',
+      manualConfig,
+      manualConfig?.authorizationEndpoint ?? manualConfig?.loginUrl,
+      discoveredConfig?.authorizationEndpoint ?? discoveredConfig?.loginUrl,
+    );
+    const tokenEndpoint = this.pickAuthConfigValue(
+      'tokenEndpoint',
+      manualConfig,
+      manualConfig?.tokenEndpoint ?? manualConfig?.tokenUrl,
+      discoveredConfig?.tokenEndpoint ?? discoveredConfig?.tokenUrl,
+    );
+    const callbackUrl = this.pickAuthConfigValue(
+      'callbackUrl',
+      manualConfig,
+      manualConfig?.callbackUrl,
+      discoveredConfig?.callbackUrl,
+    ) ?? this.getOAuthCallbackUrl();
+
     const merged: McpServerAuthConfig = {
       authType: manualConfig?.authType ?? discoveredConfig?.authType ?? 'oauth2',
-      issuer: manualConfig?.issuer ?? discoveredConfig?.issuer,
-      authorizationServerUrl: manualConfig?.authorizationServerUrl ?? discoveredConfig?.authorizationServerUrl,
-      authorizationEndpoint: manualConfig?.authorizationEndpoint ?? manualConfig?.loginUrl ?? discoveredConfig?.authorizationEndpoint ?? discoveredConfig?.loginUrl,
-      loginUrl: manualConfig?.loginUrl ?? manualConfig?.authorizationEndpoint ?? discoveredConfig?.loginUrl ?? discoveredConfig?.authorizationEndpoint,
-      tokenEndpoint: manualConfig?.tokenEndpoint ?? manualConfig?.tokenUrl ?? discoveredConfig?.tokenEndpoint ?? discoveredConfig?.tokenUrl,
-      tokenUrl: manualConfig?.tokenUrl ?? manualConfig?.tokenEndpoint ?? discoveredConfig?.tokenUrl ?? discoveredConfig?.tokenEndpoint,
-      clientId: manualConfig?.clientId ?? discoveredConfig?.clientId,
-      scopes: manualConfig?.scopes?.length ? manualConfig.scopes : discoveredConfig?.scopes,
-      callbackUrl: this.getOAuthCallbackUrl(),
+      issuer: discoveredConfig?.issuer ?? manualConfig?.issuer,
+      authorizationServerUrl: this.pickAuthConfigValue(
+        'authorizationServerUrl',
+        manualConfig,
+        manualConfig?.authorizationServerUrl,
+        discoveredConfig?.authorizationServerUrl,
+      ),
+      authorizationServerMetadataUrl:
+        this.pickAuthConfigValue(
+          'authorizationServerMetadataUrl',
+          manualConfig,
+          manualConfig?.authorizationServerMetadataUrl,
+          discoveredConfig?.authorizationServerMetadataUrl,
+        ),
+      authorizationEndpoint,
+      loginUrl: authorizationEndpoint,
+      tokenEndpoint,
+      tokenUrl: tokenEndpoint,
+      registrationEndpoint: this.pickAuthConfigValue(
+        'registrationEndpoint',
+        manualConfig,
+        manualConfig?.registrationEndpoint,
+        discoveredConfig?.registrationEndpoint,
+      ),
+      clientId: this.pickAuthConfigValue(
+        'clientId',
+        manualConfig,
+        manualConfig?.clientId,
+        discoveredConfig?.clientId,
+      ),
+      scopes: this.pickAuthConfigArrayValue(
+        'scopes',
+        manualConfig,
+        manualConfig?.scopes,
+        discoveredConfig?.scopes,
+      ),
+      resource: this.pickAuthConfigValue(
+        'resource',
+        manualConfig,
+        manualConfig?.resource,
+        discoveredConfig?.resource,
+      ),
+      callbackUrl,
       protectedResourceMetadataUrl:
-        manualConfig?.protectedResourceMetadataUrl ?? discoveredConfig?.protectedResourceMetadataUrl,
+        discoveredConfig?.protectedResourceMetadataUrl ?? manualConfig?.protectedResourceMetadataUrl,
+      clientIdMetadataDocumentSupported:
+        discoveredConfig?.clientIdMetadataDocumentSupported
+        ?? manualConfig?.clientIdMetadataDocumentSupported,
+      resourceParameterSupported:
+        discoveredConfig?.resourceParameterSupported
+        ?? manualConfig?.resourceParameterSupported,
+      registrationPreference:
+        manualConfig?.registrationPreference
+        ?? discoveredConfig?.registrationPreference
+        ?? 'auto',
+      clientMode: discoveredConfig?.clientMode ?? manualConfig?.clientMode,
+      authRecipe: manualConfig?.authRecipe ?? discoveredConfig?.authRecipe,
+      manualOverrides: manualOverrides.size ? [...manualOverrides] : undefined,
       discovered: discoveredConfig?.discovered ?? false,
     };
 
     return merged;
   }
 
-  private async discoverAuthConfig(mcpServerUrl: string): Promise<McpServerAuthConfig | null> {
+  private async discoverAuthConfig(
+    mcpServerUrl: string,
+    manualConfig: McpServerAuthConfig | null | undefined,
+  ): Promise<McpServerAuthConfig | null> {
     let protectedResourceUrl: string | null = null;
     let protectedResource: ProtectedResourceMetadata | null = null;
+    const protectedResourceCandidates = new Set<string>();
+
+    if (manualConfig?.protectedResourceMetadataUrl) {
+      protectedResourceCandidates.add(manualConfig.protectedResourceMetadataUrl);
+    }
 
     for (const candidate of this.buildProtectedResourceMetadataCandidates(mcpServerUrl)) {
+      protectedResourceCandidates.add(candidate);
+    }
+
+    for (const candidate of protectedResourceCandidates) {
       try {
         const response = await fetch(candidate, {
           method: 'GET',
@@ -388,46 +523,85 @@ export class EmcyAgent {
       }
     }
 
-    if (!protectedResource) {
-      return null;
-    }
-
     const authServerUrl =
-      protectedResource.authorization_servers?.[0] ??
-      protectedResource.authorization_server;
+      protectedResource?.authorization_servers?.[0] ??
+      protectedResource?.authorization_server ??
+      manualConfig?.authorizationServerUrl;
 
-    if (!authServerUrl) {
-      return null;
-    }
+    const metadataUrl =
+      manualConfig?.authorizationServerMetadataUrl
+      ?? (authServerUrl ? this.getAuthorizationServerMetadataUrl(authServerUrl) : null);
 
     try {
-      const metadataUrl = this.getAuthorizationServerMetadataUrl(authServerUrl);
-      const response = await fetch(metadataUrl, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) {
-        return null;
+      let metadata: AuthorizationServerMetadata | null = null;
+      if (metadataUrl) {
+        const response = await fetch(metadataUrl, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+          metadata = (await response.json()) as AuthorizationServerMetadata;
+        }
       }
 
-      const metadata = (await response.json()) as AuthorizationServerMetadata;
+      if (!metadata && !protectedResource && !manualConfig) {
+        return null;
+      }
       return {
         authType: 'oauth2',
-        issuer: metadata.issuer ?? authServerUrl,
-        authorizationServerUrl: authServerUrl,
-        authorizationEndpoint: metadata.authorization_endpoint,
-        loginUrl: metadata.authorization_endpoint,
-        tokenEndpoint: metadata.token_endpoint,
-        tokenUrl: metadata.token_endpoint,
-        scopes: protectedResource.scopes_supported?.length
+        issuer: metadata?.issuer ?? authServerUrl ?? manualConfig?.issuer,
+        authorizationServerUrl: authServerUrl ?? manualConfig?.authorizationServerUrl,
+        authorizationServerMetadataUrl: metadataUrl ?? undefined,
+        authorizationEndpoint:
+          metadata?.authorization_endpoint
+          ?? manualConfig?.authorizationEndpoint
+          ?? manualConfig?.loginUrl,
+        loginUrl:
+          metadata?.authorization_endpoint
+          ?? manualConfig?.loginUrl
+          ?? manualConfig?.authorizationEndpoint,
+        tokenEndpoint:
+          metadata?.token_endpoint
+          ?? manualConfig?.tokenEndpoint
+          ?? manualConfig?.tokenUrl,
+        tokenUrl:
+          metadata?.token_endpoint
+          ?? manualConfig?.tokenUrl
+          ?? manualConfig?.tokenEndpoint,
+        registrationEndpoint:
+          metadata?.registration_endpoint ?? manualConfig?.registrationEndpoint,
+        clientId: manualConfig?.clientId,
+        scopes: protectedResource?.scopes_supported?.length
           ? protectedResource.scopes_supported
-          : metadata.scopes_supported,
-        callbackUrl: this.getOAuthCallbackUrl(),
-        protectedResourceMetadataUrl: protectedResourceUrl ?? undefined,
-        discovered: true,
+          : metadata?.scopes_supported ?? manualConfig?.scopes,
+        resource: protectedResource?.resource ?? manualConfig?.resource,
+        callbackUrl: getEffectiveCallbackUrl(manualConfig, this.getOAuthCallbackUrl()),
+        protectedResourceMetadataUrl:
+          protectedResourceUrl ?? manualConfig?.protectedResourceMetadataUrl,
+        clientIdMetadataDocumentSupported:
+          metadata?.client_id_metadata_document_supported
+          ?? manualConfig?.clientIdMetadataDocumentSupported,
+        resourceParameterSupported:
+          metadata?.resource_parameter_supported
+          ?? manualConfig?.resourceParameterSupported,
+        registrationPreference: manualConfig?.registrationPreference ?? 'auto',
+        authRecipe: manualConfig?.authRecipe,
+        discovered: Boolean(protectedResource || metadata),
       };
     } catch {
-      return null;
+      return manualConfig
+        ? {
+            ...manualConfig,
+            callbackUrl: getEffectiveCallbackUrl(manualConfig, this.getOAuthCallbackUrl()),
+            protectedResourceMetadataUrl:
+              protectedResourceUrl ?? manualConfig.protectedResourceMetadataUrl,
+            resource: protectedResource?.resource ?? manualConfig.resource,
+            scopes: protectedResource?.scopes_supported?.length
+              ? protectedResource.scopes_supported
+              : manualConfig.scopes,
+            discovered: Boolean(protectedResource),
+          }
+        : null;
     }
   }
 
@@ -435,7 +609,7 @@ export class EmcyAgent {
     mcpServerUrl: string,
     manualConfig: McpServerAuthConfig | null | undefined,
   ): Promise<McpServerAuthConfig | null> {
-    const discoveredConfig = await this.discoverAuthConfig(mcpServerUrl);
+    const discoveredConfig = await this.discoverAuthConfig(mcpServerUrl, manualConfig);
     return this.mergeAuthConfigs(manualConfig, discoveredConfig);
   }
 
@@ -445,12 +619,30 @@ export class EmcyAgent {
       return null;
     }
 
-    if (server.authConfig?.authorizationEndpoint || server.authConfig?.tokenEndpoint || server.authConfig?.tokenUrl) {
+    if (
+      server.authConfig
+      && (
+        server.authConfig.authType !== 'oauth2'
+        || server.authConfig.discovered
+        || !!server.authConfig.authorizationEndpoint
+        || !!server.authConfig.tokenEndpoint
+        || !!server.authConfig.tokenUrl
+        || !!server.authConfig.registrationEndpoint
+        || !!server.authConfig.resource
+      )
+    ) {
       return server.authConfig;
     }
 
     server.authConfig = await this.resolveServerAuthConfig(mcpServerUrl, server.authConfig ?? null);
     return server.authConfig;
+  }
+
+  private updateServerAuthConfig(mcpServerUrl: string, authConfig: McpServerAuthConfig): void {
+    const server = this.agentConfig?.mcpServers?.find((item) => item.url === mcpServerUrl);
+    if (server) {
+      server.authConfig = authConfig;
+    }
   }
 
   private emit<K extends EmcyAgentEvent>(event: K, data: EmcyAgentEventMap[K]): void {
@@ -461,29 +653,128 @@ export class EmcyAgent {
   // OAuth Token Storage (standalone mode only)
   // ================================================================
 
-  /** Generate a localStorage key for an MCP server URL */
+  /** Generate the legacy token cache suffix used before auth-aware keying. */
   private hashUrl(url: string): string {
     return btoa(url).replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
   }
 
-  /** Load OAuth token from localStorage */
+  private getLegacyTokenStorageKey(mcpServerUrl: string): string {
+    return `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
+  }
+
+  private getTokenStorageKey(
+    mcpServerUrl: string,
+    authConfig: McpServerAuthConfig | null | undefined,
+  ): string {
+    return `${EmcyAgent.STORAGE_PREFIX}${buildTokenCacheKey(authConfig, mcpServerUrl)}`;
+  }
+
+  private getTokenStorageCandidates(
+    mcpServerUrl: string,
+  ): Array<{ storageKey: string; authConfig: McpServerAuthConfig | null }> {
+    const currentAuthConfig = this.getServerAuthConfig(mcpServerUrl);
+    if (!currentAuthConfig) {
+      return [{
+        storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
+        authConfig: null,
+      }];
+    }
+
+    const callbackUrl = getEffectiveCallbackUrl(currentAuthConfig, this.getOAuthCallbackUrl());
+    const candidates: McpServerAuthConfig[] = [currentAuthConfig];
+
+    if (currentAuthConfig.authType === 'oauth2') {
+      candidates.push({
+        ...currentAuthConfig,
+        clientMode: 'manual',
+        callbackUrl,
+      });
+
+      if (currentAuthConfig.clientId) {
+        candidates.push({
+          ...currentAuthConfig,
+          clientMode: 'preregistered',
+          callbackUrl,
+        });
+      }
+
+      if (
+        currentAuthConfig.clientIdMetadataDocumentSupported
+        && this.config.oauthClientMetadataUrl
+      ) {
+        candidates.push({
+          ...currentAuthConfig,
+          clientId: this.config.oauthClientMetadataUrl,
+          clientMode: 'cimd',
+          callbackUrl,
+        });
+      }
+
+      if (currentAuthConfig.registrationEndpoint) {
+        const cacheKey = buildRegistrationCacheKey(currentAuthConfig, callbackUrl, 'dcr');
+        const storedRegistration = loadStoredRegistration(cacheKey);
+        if (storedRegistration?.clientId) {
+          candidates.push(applyResolvedRegistration(currentAuthConfig, {
+            cacheKey,
+            mode: 'dcr',
+            clientId: storedRegistration.clientId,
+            callbackUrl,
+            resource: currentAuthConfig.resource,
+            authorizationServerUrl: currentAuthConfig.authorizationServerUrl,
+            authorizationServerMetadataUrl: currentAuthConfig.authorizationServerMetadataUrl,
+            registrationEndpoint: currentAuthConfig.registrationEndpoint,
+          }));
+        }
+      }
+    }
+
+    const seen = new Set<string>();
+    const resolved = candidates.map((candidate) => ({
+      storageKey: this.getTokenStorageKey(mcpServerUrl, candidate),
+      authConfig: candidate,
+    })).filter((candidate) => {
+      if (seen.has(candidate.storageKey)) return false;
+      seen.add(candidate.storageKey);
+      return true;
+    });
+
+    resolved.push({
+      storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
+      authConfig: currentAuthConfig,
+    });
+
+    return resolved;
+  }
+
+  /** Load OAuth token from memory/localStorage using auth-aware cache keying. */
   private loadOAuthToken(mcpServerUrl: string): {
     accessToken: string;
     refreshToken?: string;
     expiresAt: number;
   } | null {
-    const cached = this.oauthTokens.get(mcpServerUrl);
-    if (cached) return cached;
+    for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
+      const cached = this.oauthTokens.get(candidate.storageKey);
+      if (cached) {
+        if (candidate.authConfig) {
+          this.updateServerAuthConfig(mcpServerUrl, candidate.authConfig);
+        }
+        return cached;
+      }
+    }
 
     try {
       if (typeof localStorage !== 'undefined') {
-        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          const data = JSON.parse(stored);
-          if (data.accessToken && data.expiresAt) {
-            this.oauthTokens.set(mcpServerUrl, data);
-            return data;
+        for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
+          const stored = localStorage.getItem(candidate.storageKey);
+          if (stored) {
+            const data = JSON.parse(stored);
+            if (data.accessToken && data.expiresAt) {
+              this.oauthTokens.set(candidate.storageKey, data);
+              if (candidate.authConfig) {
+                this.updateServerAuthConfig(mcpServerUrl, candidate.authConfig);
+              }
+              return data;
+            }
           }
         }
       }
@@ -502,6 +793,9 @@ export class EmcyAgent {
 
   /** Store OAuth token to memory and localStorage */
   private storeOAuthToken(mcpServerUrl: string, tokenResponse: OAuthTokenResponse): void {
+    const resolvedAuthConfig =
+      tokenResponse.resolvedAuthConfig ?? this.getServerAuthConfig(mcpServerUrl);
+    const storageKey = this.getTokenStorageKey(mcpServerUrl, resolvedAuthConfig);
     const expiresIn = tokenResponse.expiresIn ?? 3600;
     const expiresAt = Date.now() + (expiresIn * 1000) - (60 * 1000); // 1 min buffer
     const data = {
@@ -509,24 +803,26 @@ export class EmcyAgent {
       refreshToken: tokenResponse.refreshToken,
       expiresAt,
     };
-    this.oauthTokens.set(mcpServerUrl, data);
+    this.oauthTokens.set(storageKey, data);
 
     try {
       if (typeof localStorage !== 'undefined') {
-        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
-        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(storageKey, JSON.stringify(data));
       }
     } catch { /* ignore */ }
   }
 
   /** Clear OAuth token from memory and localStorage */
   private clearOAuthToken(mcpServerUrl: string): void {
-    this.oauthTokens.delete(mcpServerUrl);
+    for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
+      this.oauthTokens.delete(candidate.storageKey);
+    }
 
     try {
       if (typeof localStorage !== 'undefined') {
-        const key = `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
-        localStorage.removeItem(key);
+        for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
+          localStorage.removeItem(candidate.storageKey);
+        }
       }
     } catch { /* ignore */ }
   }
@@ -543,6 +839,7 @@ export class EmcyAgent {
         refresh_token: refreshToken,
       });
       if (authConfig?.clientId) body.set('client_id', authConfig.clientId);
+      if (authConfig?.resource) body.set('resource', authConfig.resource);
 
       const response = await fetch(tokenUrl, {
         method: 'POST',
@@ -557,6 +854,7 @@ export class EmcyAgent {
             accessToken: data.access_token,
             refreshToken: data.refresh_token ?? refreshToken,
             expiresIn: data.expires_in,
+            resolvedAuthConfig: authConfig ?? undefined,
           };
           this.storeOAuthToken(mcpServerUrl, tokenResponse);
           return data.access_token;
@@ -585,6 +883,8 @@ export class EmcyAgent {
       return undefined;
     }
 
+    const authConfig = await this.ensureServerAuthConfig(mcpServerUrl);
+
     // OAuth mode: check stored token with expiry
     const stored = this.loadOAuthToken(mcpServerUrl);
     if (stored) {
@@ -605,10 +905,22 @@ export class EmcyAgent {
 
     // No valid token - trigger auth flow
     if (this.config.onAuthRequired) {
-      const authConfig = await this.ensureServerAuthConfig(mcpServerUrl);
       if (authConfig) {
-        const tokenResponse = await this.config.onAuthRequired(mcpServerUrl, authConfig);
+        const resolvedAuthConfig =
+          authConfig.authType === 'oauth2'
+            ? await this.resolveOAuthClientRegistration(authConfig)
+            : authConfig;
+        if (resolvedAuthConfig) {
+          this.updateServerAuthConfig(mcpServerUrl, resolvedAuthConfig);
+        }
+        const tokenResponse = await this.config.onAuthRequired(
+          mcpServerUrl,
+          resolvedAuthConfig ?? authConfig,
+        );
         if (tokenResponse?.accessToken) {
+          if (tokenResponse.resolvedAuthConfig) {
+            this.updateServerAuthConfig(mcpServerUrl, tokenResponse.resolvedAuthConfig);
+          }
           this.storeOAuthToken(mcpServerUrl, tokenResponse);
           return tokenResponse.accessToken;
         }

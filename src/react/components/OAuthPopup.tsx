@@ -1,6 +1,12 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as styles from './styles';
 import type { McpServerAuthConfig, OAuthTokenResponse } from '../../core/types';
+import {
+  applyResolvedRegistration,
+  buildRegistrationCacheKey,
+  clearStoredRegistration,
+  resolveOAuthRegistration,
+} from '../../core/auth/registration';
 
 export interface OAuthPopupProps {
   serverName: string;
@@ -99,13 +105,30 @@ const statusText: React.CSSProperties = {
   margin: '12px 0 0 0',
 };
 
+const errorText: React.CSSProperties = {
+  fontSize: '12px',
+  color: '#b91c1c',
+  margin: '12px 0 0 0',
+};
+
+const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
+
 export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose }: OAuthPopupProps) {
   const popupWindowRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const codeVerifierRef = useRef<string>('');
   const stateRef = useRef<string>('');
-  const callbackUrl = authConfig.callbackUrl ?? `${window.location.origin}/oauth/callback`;
-  const callbackOrigin = new URL(callbackUrl).origin;
+  const resolvedAuthConfigRef = useRef<McpServerAuthConfig>(authConfig);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [popupError, setPopupError] = useState<string | null>(null);
+
+  useEffect(() => {
+    resolvedAuthConfigRef.current = authConfig;
+  }, [authConfig]);
+
+  const getCallbackUrl = useCallback((config: McpServerAuthConfig) => (
+    config.callbackUrl ?? `${window.location.origin}/oauth/callback`
+  ), []);
 
   const cleanup = useCallback(() => {
     if (pollTimerRef.current) {
@@ -119,6 +142,8 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      const currentCallbackUrl = getCallbackUrl(resolvedAuthConfigRef.current);
+      const callbackOrigin = new URL(currentCallbackUrl).origin;
       if (event.origin !== callbackOrigin) {
         return;
       }
@@ -134,7 +159,10 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       // Legacy: simple token string
       if (event.data?.type === 'emcy-oauth-callback' && event.data?.token) {
         cleanup();
-        onToken({ accessToken: event.data.token });
+        onToken({
+          accessToken: event.data.token,
+          resolvedAuthConfig: resolvedAuthConfigRef.current,
+        });
       }
       // Full token response with refresh token
       if (event.data?.type === 'emcy-oauth-callback' && event.data?.accessToken) {
@@ -144,6 +172,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
           refreshToken: event.data.refreshToken,
           expiresIn: event.data.expiresIn,
           tokenType: event.data.tokenType,
+          resolvedAuthConfig: resolvedAuthConfigRef.current,
         });
       }
       if (event.data?.type === 'emcy-oauth-code' && event.data?.code) {
@@ -156,21 +185,28 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       window.removeEventListener('message', handler);
       cleanup();
     };
-  }, [cleanup, onToken]);
+  }, [cleanup, getCallbackUrl, onToken]);
 
   const exchangeCodeForToken = async (code: string) => {
-    const tokenUrl = authConfig.tokenEndpoint ?? authConfig.tokenUrl;
+    const effectiveAuthConfig = resolvedAuthConfigRef.current;
+    const callbackUrl = getCallbackUrl(effectiveAuthConfig);
+    const tokenUrl = effectiveAuthConfig.tokenEndpoint ?? effectiveAuthConfig.tokenUrl;
     if (!tokenUrl) return;
 
     try {
+      setPopupError(null);
+      setStatusMessage('Exchanging authorization code...');
       const body = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         code_verifier: codeVerifierRef.current,
         redirect_uri: callbackUrl,
       });
-      if (authConfig.clientId) {
-        body.set('client_id', authConfig.clientId);
+      if (effectiveAuthConfig.clientId) {
+        body.set('client_id', effectiveAuthConfig.clientId);
+      }
+      if (effectiveAuthConfig.resource) {
+        body.set('resource', effectiveAuthConfig.resource);
       }
 
       const response = await fetch(tokenUrl, {
@@ -189,17 +225,56 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
             refreshToken: data.refresh_token,
             expiresIn: data.expires_in,
             tokenType: data.token_type,
+            resolvedAuthConfig: effectiveAuthConfig,
           });
         }
+        return;
       }
+
+      const errorMessage = await response.text().catch(() => 'Token exchange failed.');
+      if (effectiveAuthConfig.clientMode === 'dcr') {
+        clearStoredRegistration(
+          buildRegistrationCacheKey(effectiveAuthConfig, callbackUrl, 'dcr'),
+        );
+      }
+      setPopupError(errorMessage || 'Token exchange failed.');
     } catch {
-      // Token exchange failed silently; user can retry
+      setPopupError('Token exchange failed. Please try again.');
+      setStatusMessage(null);
     }
   };
 
   const handleSignIn = async () => {
-    const loginUrl = authConfig.authorizationEndpoint ?? authConfig.loginUrl;
+    setPopupError(null);
+    setStatusMessage('Preparing secure sign in...');
+
+    let effectiveAuthConfig = authConfig;
+    try {
+      if (authConfig.authType === 'oauth2') {
+        const registration = await resolveOAuthRegistration(authConfig, {
+          callbackUrl: getCallbackUrl(authConfig),
+          oauthClientMetadataUrl: DEFAULT_OAUTH_CLIENT_METADATA_URL,
+          clientName: 'Emcy MCP Client',
+          clientUri: 'https://emcy.ai',
+        });
+        effectiveAuthConfig = applyResolvedRegistration(authConfig, registration);
+        resolvedAuthConfigRef.current = effectiveAuthConfig;
+      }
+    } catch (error) {
+      setPopupError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to prepare OAuth sign in for this MCP server.',
+      );
+      setStatusMessage(null);
+      return;
+    }
+
+    const callbackUrl = getCallbackUrl(effectiveAuthConfig);
+    const loginUrl = effectiveAuthConfig.authorizationEndpoint ?? effectiveAuthConfig.loginUrl;
     if (!loginUrl) {
+      setPopupError('This MCP server is missing an authorization endpoint.');
+      setStatusMessage(null);
       onClose();
       return;
     }
@@ -211,7 +286,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
 
     let authUrl: string;
 
-    if (authConfig.tokenEndpoint ?? authConfig.tokenUrl) {
+    if (effectiveAuthConfig.tokenEndpoint ?? effectiveAuthConfig.tokenUrl) {
       const codeChallenge = await generateCodeChallenge(codeVerifier);
       const params = new URLSearchParams({
         response_type: 'code',
@@ -220,11 +295,14 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         state,
         redirect_uri: callbackUrl,
       });
-      if (authConfig.clientId) {
-        params.set('client_id', authConfig.clientId);
+      if (effectiveAuthConfig.clientId) {
+        params.set('client_id', effectiveAuthConfig.clientId);
       }
-      if (authConfig.scopes?.length) {
-        params.set('scope', authConfig.scopes.join(' '));
+      if (effectiveAuthConfig.scopes?.length) {
+        params.set('scope', effectiveAuthConfig.scopes.join(' '));
+      }
+      if (effectiveAuthConfig.resource) {
+        params.set('resource', effectiveAuthConfig.resource);
       }
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
     } else {
@@ -234,6 +312,12 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         redirect_uri: callbackUrl,
         mode: 'popup',
       });
+      if (effectiveAuthConfig.clientId) {
+        params.set('client_id', effectiveAuthConfig.clientId);
+      }
+      if (effectiveAuthConfig.resource) {
+        params.set('resource', effectiveAuthConfig.resource);
+      }
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
     }
 
@@ -253,9 +337,12 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       `width=${width},height=${height},left=${left},top=${top},popup=true`,
     );
 
+    setStatusMessage('Waiting for sign in...');
+
     pollTimerRef.current = setInterval(() => {
       if (popupWindowRef.current?.closed) {
         cleanup();
+        setStatusMessage(null);
       }
     }, 500);
   };
@@ -275,9 +362,8 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
             Cancel
           </button>
         </div>
-        {popupWindowRef.current && !popupWindowRef.current.closed && (
-          <p style={statusText}>Waiting for sign in...</p>
-        )}
+        {statusMessage && <p style={statusText}>{statusMessage}</p>}
+        {popupError && <p style={errorText}>{popupError}</p>}
       </div>
     </div>
   );
