@@ -31,6 +31,26 @@ const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 const DEFAULT_OAUTH_CALLBACK_URL = 'https://emcy.ai/oauth/callback';
 const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
 
+function isLocalhostHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function getDefaultOAuthCallbackUrl(): string {
+  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
+    return `${window.location.origin}/oauth/callback`;
+  }
+
+  return DEFAULT_OAUTH_CALLBACK_URL;
+}
+
+function getDefaultOAuthClientMetadataUrl(): string {
+  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
+    return `${window.location.origin}/.well-known/oauth-client-metadata.json`;
+  }
+
+  return DEFAULT_OAUTH_CLIENT_METADATA_URL;
+}
+
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
   const properties: Record<string, object> = {};
@@ -87,9 +107,9 @@ export class EmcyAgent {
     this.config = {
       ...config,
       agentServiceUrl: config.agentServiceUrl ?? 'https://api.emcy.ai',
-      oauthCallbackUrl: config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL,
+      oauthCallbackUrl: config.oauthCallbackUrl ?? getDefaultOAuthCallbackUrl(),
       oauthClientMetadataUrl:
-        config.oauthClientMetadataUrl ?? DEFAULT_OAUTH_CLIENT_METADATA_URL,
+        config.oauthClientMetadataUrl ?? getDefaultOAuthClientMetadataUrl(),
     };
   }
 

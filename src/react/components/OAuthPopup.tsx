@@ -113,6 +113,18 @@ const errorText: React.CSSProperties = {
 
 const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
 
+function isLocalhostHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function getDefaultClientMetadataUrl(): string {
+  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
+    return `${window.location.origin}/.well-known/oauth-client-metadata.json`;
+  }
+
+  return DEFAULT_OAUTH_CLIENT_METADATA_URL;
+}
+
 export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose }: OAuthPopupProps) {
   const popupWindowRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
@@ -253,9 +265,9 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       if (authConfig.authType === 'oauth2') {
         const registration = await resolveOAuthRegistration(authConfig, {
           callbackUrl: getCallbackUrl(authConfig),
-          oauthClientMetadataUrl: DEFAULT_OAUTH_CLIENT_METADATA_URL,
+          oauthClientMetadataUrl: getDefaultClientMetadataUrl(),
           clientName: 'Emcy MCP Client',
-          clientUri: 'https://emcy.ai',
+          clientUri: typeof window !== 'undefined' ? window.location.origin : 'https://emcy.ai',
         });
         effectiveAuthConfig = applyResolvedRegistration(authConfig, registration);
         resolvedAuthConfigRef.current = effectiveAuthConfig;
