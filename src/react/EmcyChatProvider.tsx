@@ -21,6 +21,7 @@ export interface EmcyChatContextValue {
   mcpServers: McpServerStatus[];
   hasGetToken: boolean;
   sendMessage: (message: string) => Promise<void>;
+  signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
   streamingContent: string;
@@ -166,6 +167,10 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     await agent.sendMessage(message);
   };
 
+  const signOutMcpServer = async (mcpServerUrl: string) => {
+    await agent.signOutMcpServer(mcpServerUrl);
+  };
+
   const cancel = () => {
     agent.cancel();
   };
@@ -190,6 +195,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         mcpServers,
         hasGetToken: !!config.getToken,
         sendMessage,
+        signOutMcpServer,
         cancel,
         newConversation,
         streamingContent,

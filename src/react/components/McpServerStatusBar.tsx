@@ -5,11 +5,13 @@ export interface McpServerStatus {
   url: string;
   name: string;
   authStatus: 'connected' | 'needs_auth';
+  canSignOut?: boolean;
 }
 
 export interface McpServerStatusBarProps {
   servers: McpServerStatus[];
   onAuthClick?: (serverUrl: string, serverName: string) => void;
+  onSignOutClick?: (serverUrl: string, serverName: string) => void;
 }
 
 const statusBarContainer: React.CSSProperties = {
@@ -27,6 +29,7 @@ const serverRow: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: '8px',
+  flexWrap: 'wrap',
   fontSize: '12px',
 };
 
@@ -49,6 +52,13 @@ const statusBadgeConnected: React.CSSProperties = {
   flexShrink: 0,
 };
 
+const serverActions: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  flexShrink: 0,
+};
+
 const statusBadgeNeedsAuth: React.CSSProperties = {
   fontSize: '11px',
   fontWeight: 500,
@@ -61,7 +71,23 @@ const statusBadgeNeedsAuth: React.CSSProperties = {
   flexShrink: 0,
 };
 
-export function McpServerStatusBar({ servers, onAuthClick }: McpServerStatusBarProps) {
+const signOutButton: React.CSSProperties = {
+  fontSize: '11px',
+  fontWeight: 500,
+  padding: '2px 8px',
+  borderRadius: '9999px',
+  backgroundColor: 'transparent',
+  color: styles.colors.textSecondary,
+  cursor: 'pointer',
+  border: `1px solid ${styles.colors.border}`,
+  flexShrink: 0,
+};
+
+export function McpServerStatusBar({
+  servers,
+  onAuthClick,
+  onSignOutClick,
+}: McpServerStatusBarProps) {
   if (!servers || servers.length === 0) return null;
 
   return (
@@ -70,7 +96,18 @@ export function McpServerStatusBar({ servers, onAuthClick }: McpServerStatusBarP
         <div key={server.url} style={serverRow}>
           <span style={serverName}>{server.name}</span>
           {server.authStatus === 'connected' ? (
-            <span style={statusBadgeConnected}>Connected</span>
+            <div style={serverActions}>
+              <span style={statusBadgeConnected}>Connected</span>
+              {server.canSignOut && (
+                <button
+                  style={signOutButton}
+                  onClick={() => onSignOutClick?.(server.url, server.name)}
+                  type="button"
+                >
+                  Sign Out
+                </button>
+              )}
+            </div>
           ) : (
             <button
               style={statusBadgeNeedsAuth}

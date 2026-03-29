@@ -20,6 +20,7 @@ export interface UseEmcyAgentReturn {
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
   sendMessage: (message: string) => Promise<void>;
+  signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
   streamingContent: string;
@@ -157,6 +158,10 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     await agent.sendMessage(message);
   };
 
+  const signOutMcpServer = async (mcpServerUrl: string) => {
+    await agent.signOutMcpServer(mcpServerUrl);
+  };
+
   const cancel = () => {
     agent.cancel();
   };
@@ -178,6 +183,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agentConfig,
     mcpServers,
     sendMessage,
+    signOutMcpServer,
     cancel,
     newConversation,
     streamingContent,

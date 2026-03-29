@@ -343,4 +343,127 @@ describe('EmcyAgent auth behavior', () => {
     expect(getToken).toHaveBeenCalledWith(MCP_SERVER_URL);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('signs out standalone OAuth servers by clearing local auth state', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === MCP_SERVER_URL) {
+        expect(init?.method).toBe('DELETE');
+        expect(init?.headers).toMatchObject({
+          'Mcp-Session-Id': 'session-123',
+          Authorization: 'Bearer cached-access-token',
+        });
+        return new Response(null, { status: 204 });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      tokenUrl: 'https://auth.todo.example.com/oauth/token',
+    };
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+    });
+
+    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (agent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'cached-access-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+    (
+      agent as unknown as {
+        mcpSessions: Map<string, { sessionId: string | null; authStatus: 'connected' | 'needs_auth' }>;
+      }
+    ).mcpSessions.set(MCP_SERVER_URL, {
+      sessionId: 'session-123',
+      authStatus: 'connected',
+    });
+
+    await agent.signOutMcpServer(MCP_SERVER_URL);
+
+    const token = await (agent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(token).toBeUndefined();
+    expect(localStorage.length).toBe(0);
+    expect(agent.getMcpServers()).toEqual([{
+      url: MCP_SERVER_URL,
+      name: 'Todo MCP',
+      authStatus: 'needs_auth',
+      canSignOut: true,
+    }]);
+  });
+
+  it('blocks embedded auto-token reuse after sign-out until the user reconnects', async () => {
+    const getToken = vi.fn().mockResolvedValue({ accessToken: 'embedded-access-token' });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === MCP_SERVER_URL) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        if (init?.method === 'POST' && headers?.Authorization === 'Bearer embedded-access-token') {
+          return new Response('{}', {
+            status: 200,
+            headers: { 'mcp-session-id': 'session-embedded' },
+          });
+        }
+
+        if (init?.method === 'POST') {
+          return new Response('{}', { status: 200 });
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      getToken,
+    });
+
+    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig({
+        authType: 'bearer',
+      });
+
+    (
+      agent as unknown as {
+        mcpSessions: Map<string, { sessionId: string | null; authStatus: 'connected' | 'needs_auth' }>;
+      }
+    ).mcpSessions.set(MCP_SERVER_URL, {
+      sessionId: null,
+      authStatus: 'connected',
+    });
+
+    await agent.signOutMcpServer(MCP_SERVER_URL);
+
+    const tokenWhileSignedOut = await (agent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(tokenWhileSignedOut).toBeUndefined();
+    expect(agent.getMcpServers()[0]?.authStatus).toBe('needs_auth');
+
+    const reconnected = await agent.authenticate(MCP_SERVER_URL);
+
+    expect(reconnected).toBe(true);
+    expect(agent.getMcpServers()[0]?.authStatus).toBe('connected');
+    expect(getToken).toHaveBeenCalledWith(MCP_SERVER_URL);
+  });
 });

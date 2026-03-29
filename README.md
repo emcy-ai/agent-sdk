@@ -111,6 +111,7 @@ The `mcpServerUrl` parameter lets you return different tokens for different MCP 
 - No SDK-side token caching — your app manages refresh
 - Return a string (access token) or `{ accessToken, refreshToken?, expiresIn? }`
 - On 401, the SDK calls `getToken` again for a fresh token
+- Clicking `Sign Out` on a connected MCP server disconnects that server inside the SDK until the user explicitly reconnects it
 
 ### Standalone mode (OAuth popup)
 
@@ -121,6 +122,7 @@ When `getToken` is not provided, the SDK handles auth via built-in OAuth popup. 
 - Checks token expiry before each use
 - Automatically refreshes using `refreshToken` if expired
 - Opens OAuth popup when no valid token exists
+- Clicking `Sign Out` clears the cached OAuth token and resets the MCP session
 
 ### Multiple MCP servers
 
@@ -183,7 +185,7 @@ Or in a flex layout:
 
 ### `useEmcyAgent(config)`
 
-Hook for custom UI. Returns `messages`, `streamingContent`, `isLoading`, `isThinking`, `sendMessage`, `newConversation`, `cancel`, etc.
+Hook for custom UI. Returns `messages`, `streamingContent`, `isLoading`, `isThinking`, `sendMessage`, `signOutMcpServer`, `newConversation`, `cancel`, etc.
 
 ### `EmcyChatProvider` + `useEmcyChatContext`
 

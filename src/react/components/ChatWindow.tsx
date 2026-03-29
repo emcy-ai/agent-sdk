@@ -23,6 +23,7 @@ export interface ChatWindowProps {
   onClose?: () => void;
   onNewConversation?: () => void;
   onMcpAuthClick?: (serverUrl: string, serverName: string) => void;
+  onMcpSignOutClick?: (serverUrl: string, serverName: string) => void;
   /** 'floating' = fixed card (default), 'inline' = fill container */
   variant?: 'floating' | 'inline';
 }
@@ -41,6 +42,7 @@ export function ChatWindow({
   onClose,
   onNewConversation,
   onMcpAuthClick,
+  onMcpSignOutClick,
   variant = 'floating',
 }: ChatWindowProps) {
   const containerStyle = variant === 'inline' ? styles.chatWindowInline : styles.chatWindow;
@@ -78,7 +80,11 @@ export function ChatWindow({
       </div>
 
       {/* MCP Server Status */}
-      <McpServerStatusBar servers={mcpServers || []} onAuthClick={onMcpAuthClick} />
+      <McpServerStatusBar
+        servers={mcpServers || []}
+        onAuthClick={onMcpAuthClick}
+        onSignOutClick={onMcpSignOutClick}
+      />
 
       {/* Messages */}
       <MessageList

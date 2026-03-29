@@ -80,7 +80,19 @@ function EmcyChatInner({
     serverName: string;
     authConfig: McpServerAuthConfig;
   } | null>(null);
-  const { agent, messages, streamingContent, isLoading, isThinking, error, sendMessage, newConversation, mcpServers, hasGetToken } =
+  const {
+    agent,
+    messages,
+    streamingContent,
+    isLoading,
+    isThinking,
+    error,
+    sendMessage,
+    signOutMcpServer,
+    newConversation,
+    mcpServers,
+    hasGetToken,
+  } =
     useEmcyChatContext();
 
   // Use widget config from agent if no explicit props
@@ -126,6 +138,10 @@ function EmcyChatInner({
     setOauthPopup(null);
   };
 
+  const handleMcpSignOutClick = (serverUrl: string, _serverName: string) => {
+    signOutMcpServer(serverUrl).catch(() => {});
+  };
+
   const isOpen = animState === 'open' || animState === 'opening';
   const isVisible = animState !== 'closed';
 
@@ -146,6 +162,7 @@ function EmcyChatInner({
           onSend={sendMessage}
           onNewConversation={newConversation}
           onMcpAuthClick={handleMcpAuthClick}
+          onMcpSignOutClick={handleMcpSignOutClick}
         />
         {oauthPopup && (
           <OAuthPopup
@@ -182,6 +199,7 @@ function EmcyChatInner({
             onClose={handleClose}
             onNewConversation={newConversation}
             onMcpAuthClick={handleMcpAuthClick}
+            onMcpSignOutClick={handleMcpSignOutClick}
           />
           {oauthPopup && (
             <OAuthPopup

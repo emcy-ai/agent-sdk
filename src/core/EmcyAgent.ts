@@ -99,6 +99,8 @@ export class EmcyAgent {
     refreshToken?: string;
     expiresAt: number;
   }> = new Map();
+  /** Servers explicitly disconnected by the user and awaiting manual re-auth */
+  private manuallySignedOutServers: Set<string> = new Set();
 
   /** localStorage key prefix for persisted OAuth tokens */
   private static readonly STORAGE_PREFIX = 'emcy_oauth_';
@@ -174,12 +176,18 @@ export class EmcyAgent {
   }
 
   /** Get current MCP server auth statuses */
-  getMcpServers(): Array<{ url: string; name: string; authStatus: 'connected' | 'needs_auth' }> {
+  getMcpServers(): Array<{
+    url: string;
+    name: string;
+    authStatus: 'connected' | 'needs_auth';
+    canSignOut: boolean;
+  }> {
     if (!this.agentConfig?.mcpServers) return [];
     return this.agentConfig.mcpServers.map(server => ({
       url: server.url,
       name: server.name,
       authStatus: this.mcpSessions.get(server.url)?.authStatus ?? server.authStatus ?? 'connected',
+      canSignOut: (server.authConfig?.authType ?? 'none') !== 'none',
     }));
   }
 
@@ -267,25 +275,46 @@ export class EmcyAgent {
     mcpServerUrl: string,
     tokenResponse?: OAuthTokenResponse
   ): Promise<boolean> {
-    if (tokenResponse?.accessToken) {
-      if (tokenResponse.resolvedAuthConfig) {
-        this.updateServerAuthConfig(mcpServerUrl, tokenResponse.resolvedAuthConfig);
-      }
-      this.storeOAuthToken(mcpServerUrl, tokenResponse);
-      this.updateMcpAuthStatus(mcpServerUrl, 'connected');
-      return true;
-    }
-
-    const token = await this.resolveToken(mcpServerUrl);
-    if (!token) return false;
-
+    const wasManuallySignedOut = this.manuallySignedOutServers.delete(mcpServerUrl);
     try {
+      if (tokenResponse?.accessToken) {
+        if (tokenResponse.resolvedAuthConfig) {
+          this.updateServerAuthConfig(mcpServerUrl, tokenResponse.resolvedAuthConfig);
+        }
+        this.storeOAuthToken(mcpServerUrl, tokenResponse);
+        this.updateMcpAuthStatus(mcpServerUrl, 'connected');
+        return true;
+      }
+
+      const token = await this.resolveToken(mcpServerUrl);
+      if (!token) {
+        if (wasManuallySignedOut) {
+          this.manuallySignedOutServers.add(mcpServerUrl);
+        }
+        return false;
+      }
+
       await this.initMcpSession(mcpServerUrl);
       return true;
     } catch {
+      if (wasManuallySignedOut) {
+        this.manuallySignedOutServers.add(mcpServerUrl);
+      }
       this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
       return false;
     }
+  }
+
+  /** Disconnect from an MCP server and require explicit re-authentication before reuse. */
+  async signOutMcpServer(mcpServerUrl: string): Promise<void> {
+    this.manuallySignedOutServers.add(mcpServerUrl);
+    await this.closeMcpSession(mcpServerUrl);
+
+    if (!this.config.getToken) {
+      this.clearOAuthToken(mcpServerUrl);
+    }
+
+    this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
   }
 
   /** Get the auth config for an MCP server (from workspace config) */
@@ -895,6 +924,10 @@ export class EmcyAgent {
    * - OAuth mode: Checks stored token, refreshes if expired, triggers auth if needed
    */
   private async resolveToken(mcpServerUrl: string): Promise<string | undefined> {
+    if (this.manuallySignedOutServers.has(mcpServerUrl)) {
+      return undefined;
+    }
+
     // Embed mode: always call getToken - host app manages the session
     if (this.config.getToken) {
       const result = await this.config.getToken(mcpServerUrl);
@@ -1226,6 +1259,46 @@ export class EmcyAgent {
       headers['Mcp-Session-Id'] = session.sessionId;
     }
     return headers;
+  }
+
+  /** Best-effort MCP session teardown so reconnect starts cleanly after sign-out. */
+  private async closeMcpSession(mcpServerUrl: string): Promise<void> {
+    const session = this.mcpSessions.get(mcpServerUrl);
+    if (!session?.sessionId) return;
+
+    const headers: Record<string, string> = {
+      'Accept': 'application/json, text/event-stream',
+      'Mcp-Session-Id': session.sessionId,
+    };
+
+    if (this.config.getToken) {
+      const tokenResponse = await this.config.getToken(mcpServerUrl).catch(() => undefined);
+      const accessToken =
+        typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.accessToken;
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+    } else {
+      const storedToken = this.loadOAuthToken(mcpServerUrl);
+      if (storedToken?.accessToken) {
+        headers['Authorization'] = `Bearer ${storedToken.accessToken}`;
+      }
+    }
+
+    try {
+      await fetch(mcpServerUrl, {
+        method: 'DELETE',
+        headers,
+        credentials: this.config.useCookies ? 'include' : 'omit',
+      });
+    } catch {
+      // Local state still gets reset below even if the server is unavailable.
+    }
+
+    this.mcpSessions.set(mcpServerUrl, {
+      sessionId: null,
+      authStatus: session.authStatus,
+    });
   }
 
   /** Initialize the MCP session for a specific server (required before tools/call) */
