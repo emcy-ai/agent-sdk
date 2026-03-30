@@ -118,6 +118,10 @@ export interface PopupOAuthControllerState {
   ) => Promise<OAuthTokenResponse | undefined>;
   startOrRetryPopupAuth: () => void;
   cancelPopupAuth: () => void;
+  handleServerAuthStatus: (
+    serverUrl: string,
+    authStatus: 'connected' | 'needs_auth',
+  ) => void;
 }
 
 export function usePopupOAuthController(
@@ -155,6 +159,24 @@ export function usePopupOAuthController(
     }
   }, []);
 
+  const dismissPopupState = useCallback((serverUrl?: string) => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    setPopupState((currentState) => {
+      if (!currentState) {
+        return null;
+      }
+
+      if (!serverUrl || currentState.serverUrl === serverUrl) {
+        return null;
+      }
+
+      return currentState;
+    });
+  }, []);
+
   const closePopupWindow = useCallback((request: ActivePopupAuthRequest | null) => {
     if (request?.popupWindow && !request.popupWindow.closed) {
       request.popupWindow.close();
@@ -168,6 +190,7 @@ export function usePopupOAuthController(
   const resolveAndClearActiveRequest = useCallback((tokenResponse?: OAuthTokenResponse) => {
     const request = activeRequestRef.current;
     if (!request) {
+      dismissPopupState();
       return;
     }
 
@@ -177,11 +200,8 @@ export function usePopupOAuthController(
     activeRequestRef.current = null;
 
     request.resolve(tokenResponse);
-
-    if (mountedRef.current) {
-      setPopupState(null);
-    }
-  }, [clearPollTimer, clearStoredCallbackPayload, closePopupWindow]);
+    dismissPopupState(request.serverUrl);
+  }, [clearPollTimer, clearStoredCallbackPayload, closePopupWindow, dismissPopupState]);
 
   const transitionActiveRequest = useCallback((
     phase: OAuthPopupPhase,
@@ -534,8 +554,32 @@ export function usePopupOAuthController(
   ]);
 
   const cancelPopupAuth = useCallback(() => {
+    if (!activeRequestRef.current) {
+      dismissPopupState();
+      return;
+    }
+
     resolveAndClearActiveRequest(undefined);
-  }, [resolveAndClearActiveRequest]);
+  }, [dismissPopupState, resolveAndClearActiveRequest]);
+
+  const handleServerAuthStatus = useCallback((
+    serverUrl: string,
+    authStatus: 'connected' | 'needs_auth',
+  ) => {
+    if (authStatus !== 'connected') {
+      return;
+    }
+
+    const request = activeRequestRef.current;
+    if (request && request.serverUrl === serverUrl) {
+      clearPollTimer(request);
+      closePopupWindow(request);
+      clearStoredCallbackPayload(request.state);
+      activeRequestRef.current = null;
+    }
+
+    dismissPopupState(serverUrl);
+  }, [clearPollTimer, clearStoredCallbackPayload, closePopupWindow, dismissPopupState]);
 
   const requestAuth = useCallback((
     serverUrl: string,
@@ -668,5 +712,6 @@ export function usePopupOAuthController(
     requestAuth,
     startOrRetryPopupAuth,
     cancelPopupAuth,
+    handleServerAuthStatus,
   };
 }

@@ -99,6 +99,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     requestAuth,
     startOrRetryPopupAuth,
     cancelPopupAuth,
+    handleServerAuthStatus,
   } = usePopupOAuthController({
     resolveServerName,
     oauthCallbackUrl: agent.getOAuthCallbackUrl(),
@@ -107,6 +108,12 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   });
 
   popupAuthRequestRef.current = requestAuth;
+
+  const visiblePopupState = shouldUseBuiltInPopupAuth && popupState
+    ? (mcpServers.find((server) => server.url === popupState.serverUrl)?.authStatus === 'connected'
+      ? null
+      : popupState)
+    : null;
 
   useEffect(() => {
     // Subscribe to events
@@ -186,6 +193,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     };
 
     const onMcpAuthStatus = (_event: McpAuthStatusEvent) => {
+      handleServerAuthStatus(_event.mcpServerUrl, _event.authStatus);
       setMcpServers(agent.getMcpServers());
     };
 
@@ -216,7 +224,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
       agent.off('error', onError);
       agent.off('mcp_auth_status', onMcpAuthStatus);
     };
-  }, [agent]);
+  }, [agent, handleServerAuthStatus]);
 
   const sendMessage = async (message: string) => {
     await agent.sendMessage(message);
@@ -251,7 +259,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         embeddedHostIdentity: config.embeddedAuth?.hostIdentity ?? null,
         oauthCallbackUrl: agent.getOAuthCallbackUrl(),
         oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
-        popupAuthState: shouldUseBuiltInPopupAuth ? popupState : null,
+        popupAuthState: visiblePopupState,
         startOrRetryPopupAuth: shouldUseBuiltInPopupAuth
           ? startOrRetryPopupAuth
           : () => {},
