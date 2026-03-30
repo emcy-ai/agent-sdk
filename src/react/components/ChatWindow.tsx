@@ -19,6 +19,7 @@ export interface ChatWindowProps {
   welcomeMessage?: string;
   placeholder?: string;
   mcpServers?: McpServerStatus[];
+  mcpAuthButtonLabel?: string;
   onSend: (message: string) => void;
   onClose?: () => void;
   onNewConversation?: () => void;
@@ -38,6 +39,7 @@ export function ChatWindow({
   welcomeMessage,
   placeholder,
   mcpServers,
+  mcpAuthButtonLabel,
   onSend,
   onClose,
   onNewConversation,
@@ -82,6 +84,7 @@ export function ChatWindow({
       {/* MCP Server Status */}
       <McpServerStatusBar
         servers={mcpServers || []}
+        authButtonLabel={mcpAuthButtonLabel}
         onAuthClick={onMcpAuthClick}
         onSignOutClick={onMcpSignOutClick}
       />

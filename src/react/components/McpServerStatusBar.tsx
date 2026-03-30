@@ -12,6 +12,7 @@ export interface McpServerStatusBarProps {
   servers: McpServerStatus[];
   onAuthClick?: (serverUrl: string, serverName: string) => void;
   onSignOutClick?: (serverUrl: string, serverName: string) => void;
+  authButtonLabel?: string;
 }
 
 const statusBarContainer: React.CSSProperties = {
@@ -87,6 +88,7 @@ export function McpServerStatusBar({
   servers,
   onAuthClick,
   onSignOutClick,
+  authButtonLabel = 'Needs Auth',
 }: McpServerStatusBarProps) {
   if (!servers || servers.length === 0) return null;
 
@@ -114,7 +116,7 @@ export function McpServerStatusBar({
               onClick={() => onAuthClick?.(server.url, server.name)}
               type="button"
             >
-              Needs Auth
+              {authButtonLabel}
             </button>
           )}
         </div>

@@ -9,19 +9,21 @@ describe('OAuthPopup', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the initial sign-in prompt with a primary action', () => {
+  it('renders the host-account prompt with a primary action', () => {
     render(
       <OAuthPopup
         serverName="Todo MCP"
         serverUrl="https://todo.example.com"
         phase="prompt"
+        hostIdentityLabel="alex@todo.local"
         onPrimaryAction={vi.fn()}
         onClose={vi.fn()}
       />,
     );
 
     expect(screen.getByText('Sign in to Todo MCP')).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Sign In' })).toBeDefined();
+    expect(screen.getByText('Current account: alex@todo.local')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Start AI with your account' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDefined();
   });
 

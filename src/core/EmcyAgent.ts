@@ -169,10 +169,7 @@ export class EmcyAgent {
         if (!this.mcpSessions.has(server.url)) {
           let authStatus: 'connected' | 'needs_auth';
 
-          if (this.config.getToken) {
-            // Embedded mode: always show "connected" - host app manages auth
-            authStatus = 'connected';
-          } else if (this.hasValidOAuthToken(server.url)) {
+          if (this.hasValidOAuthToken(server.url)) {
             // OAuth mode with valid stored token
             authStatus = 'connected';
           } else {
@@ -278,8 +275,8 @@ export class EmcyAgent {
 
   /**
    * Proactively authenticate with an MCP server before sending a message.
-   * In embedded mode (getToken provided), this calls getToken and verifies via MCP init.
-   * In standalone mode, this stores the provided token or triggers onAuthRequired.
+   * If a token response is provided directly, it is stored immediately.
+   * Otherwise, this uses the configured OAuth flow and verifies via MCP init.
    *
    * @param mcpServerUrl - The MCP server URL to authenticate with
    * @param tokenResponse - Optional: provide token response directly (from OAuth popup)
@@ -322,11 +319,7 @@ export class EmcyAgent {
   async signOutMcpServer(mcpServerUrl: string): Promise<void> {
     this.manuallySignedOutServers.add(mcpServerUrl);
     await this.closeMcpSession(mcpServerUrl);
-
-    if (!this.config.getToken) {
-      this.clearOAuthToken(mcpServerUrl);
-    }
-
+    this.clearOAuthToken(mcpServerUrl);
     this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
   }
 
@@ -937,19 +930,10 @@ export class EmcyAgent {
 
   /**
    * Resolve the auth token for an MCP server.
-   * - Embed mode (getToken): Always calls getToken - no caching
    * - OAuth mode: Checks stored token, refreshes if expired, triggers auth if needed
    */
   private async resolveToken(mcpServerUrl: string): Promise<string | undefined> {
     if (this.manuallySignedOutServers.has(mcpServerUrl)) {
-      return undefined;
-    }
-
-    // Embed mode: always call getToken - host app manages the session
-    if (this.config.getToken) {
-      const result = await this.config.getToken(mcpServerUrl);
-      if (typeof result === 'string') return result;
-      if (result?.accessToken) return result.accessToken;
       return undefined;
     }
 
@@ -1290,18 +1274,9 @@ export class EmcyAgent {
       'Mcp-Session-Id': session.sessionId,
     };
 
-    if (this.config.getToken) {
-      const tokenResponse = await this.config.getToken(mcpServerUrl).catch(() => undefined);
-      const accessToken =
-        typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.accessToken;
-      if (accessToken) {
-        headers['Authorization'] = `Bearer ${accessToken}`;
-      }
-    } else {
-      const storedToken = this.loadOAuthToken(mcpServerUrl);
-      if (storedToken?.accessToken) {
-        headers['Authorization'] = `Bearer ${storedToken.accessToken}`;
-      }
+    const storedToken = this.loadOAuthToken(mcpServerUrl);
+    if (storedToken?.accessToken) {
+      headers['Authorization'] = `Bearer ${storedToken.accessToken}`;
     }
 
     try {
@@ -1349,10 +1324,7 @@ export class EmcyAgent {
     });
 
     if (initResponse.status === 401) {
-      // Clear stored OAuth token (embed mode will just call getToken again)
-      if (!this.config.getToken) {
-        this.clearOAuthToken(mcpServerUrl);
-      }
+      this.clearOAuthToken(mcpServerUrl);
       this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
 
       const freshToken = await this.resolveToken(mcpServerUrl);
@@ -1502,9 +1474,7 @@ export class EmcyAgent {
 
     // 401 → clear token and try fresh auth
     if (response.status === 401) {
-      if (!this.config.getToken) {
-        this.clearOAuthToken(mcpServerUrl);
-      }
+      this.clearOAuthToken(mcpServerUrl);
       this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
 
       const freshToken = await this.resolveToken(mcpServerUrl);

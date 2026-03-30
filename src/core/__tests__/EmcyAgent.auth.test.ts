@@ -332,31 +332,6 @@ describe('EmcyAgent auth behavior', () => {
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientId).toBe('dcr-client-123');
   });
 
-  it('keeps the embedded getToken path unchanged', async () => {
-    const getToken = vi.fn().mockResolvedValue({ accessToken: 'embedded-access-token' });
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const agent = new EmcyAgent({
-      apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
-      getToken,
-    });
-
-    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig = createWorkspaceConfig({
-      authType: 'oauth2',
-      tokenUrl: 'https://auth.todo.example.com/oauth/token',
-    });
-
-    const token = await (agent as unknown as {
-      resolveToken: (url: string) => Promise<string | undefined>;
-    }).resolveToken(MCP_SERVER_URL);
-
-    expect(token).toBe('embedded-access-token');
-    expect(getToken).toHaveBeenCalledWith(MCP_SERVER_URL);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('signs out standalone OAuth servers by clearing local auth state', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -420,63 +395,4 @@ describe('EmcyAgent auth behavior', () => {
     }]);
   });
 
-  it('blocks embedded auto-token reuse after sign-out until the user reconnects', async () => {
-    const getToken = vi.fn().mockResolvedValue({ accessToken: 'embedded-access-token' });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-
-      if (url === MCP_SERVER_URL) {
-        const headers = init?.headers as Record<string, string> | undefined;
-        if (init?.method === 'POST' && headers?.Authorization === 'Bearer embedded-access-token') {
-          return new Response('{}', {
-            status: 200,
-            headers: { 'mcp-session-id': 'session-embedded' },
-          });
-        }
-
-        if (init?.method === 'POST') {
-          return new Response('{}', { status: 200 });
-        }
-      }
-
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    vi.stubGlobal('fetch', fetchMock);
-
-    const agent = new EmcyAgent({
-      apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
-      getToken,
-    });
-
-    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig({
-        authType: 'bearer',
-      });
-
-    (
-      agent as unknown as {
-        mcpSessions: Map<string, { sessionId: string | null; authStatus: 'connected' | 'needs_auth' }>;
-      }
-    ).mcpSessions.set(MCP_SERVER_URL, {
-      sessionId: null,
-      authStatus: 'connected',
-    });
-
-    await agent.signOutMcpServer(MCP_SERVER_URL);
-
-    const tokenWhileSignedOut = await (agent as unknown as {
-      resolveToken: (url: string) => Promise<string | undefined>;
-    }).resolveToken(MCP_SERVER_URL);
-
-    expect(tokenWhileSignedOut).toBeUndefined();
-    expect(agent.getMcpServers()[0]?.authStatus).toBe('needs_auth');
-
-    const reconnected = await agent.authenticate(MCP_SERVER_URL);
-
-    expect(reconnected).toBe(true);
-    expect(agent.getMcpServers()[0]?.authStatus).toBe('connected');
-    expect(getToken).toHaveBeenCalledWith(MCP_SERVER_URL);
-  });
 });

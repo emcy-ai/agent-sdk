@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { McpServerAuthConfig, OAuthTokenResponse } from '../core/types';
+import type {
+  EmcyEmbeddedAuthConfig,
+  EmcyEmbeddedAuthIdentity,
+  McpServerAuthConfig,
+  OAuthTokenResponse,
+} from '../core/types';
 import {
   applyResolvedRegistration,
   buildRegistrationCacheKey,
@@ -15,6 +20,7 @@ interface UsePopupOAuthControllerOptions {
   resolveServerName: (serverUrl: string) => string;
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
+  embeddedAuth?: EmcyEmbeddedAuthConfig;
 }
 
 interface ActivePopupAuthRequest {
@@ -29,6 +35,8 @@ interface ActivePopupAuthRequest {
   handledCallback: boolean;
   popupWindow: Window | null;
   pollTimer?: ReturnType<typeof setInterval>;
+  hostIdentity?: EmcyEmbeddedAuthIdentity;
+  hostIdentityLabel?: string | null;
 }
 
 function generateCodeVerifier(): string {
@@ -62,7 +70,44 @@ function createPopupState(
     phase,
     statusMessage: statusMessage ?? null,
     errorMessage: errorMessage ?? null,
+    hostIdentityLabel: request.hostIdentityLabel ?? null,
   };
+}
+
+function normalizeOptionalValue(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function formatHostIdentityLabel(identity?: EmcyEmbeddedAuthIdentity): string | null {
+  if (!identity) {
+    return null;
+  }
+
+  return (
+    normalizeOptionalValue(identity.displayName) ??
+    normalizeOptionalValue(identity.email) ??
+    normalizeOptionalValue(identity.subject) ??
+    null
+  );
+}
+
+function isHostedMcpAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
+  const loginUrl = authConfig.authorizationEndpoint ?? authConfig.loginUrl;
+  if (!loginUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(loginUrl);
+    return /\/api\/v1\/hosted-mcp\/[^/]+\/authorize$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 export interface PopupOAuthControllerState {
@@ -151,6 +196,24 @@ export function usePopupOAuthController(
     clearPollTimer(request);
     closePopupWindow(request);
     request.handledCallback = false;
+
+    if (mountedRef.current) {
+      setPopupState(createPopupState(request, phase, statusMessage, errorMessage));
+    }
+  }, [clearPollTimer, closePopupWindow]);
+
+  const setActivePopupPhase = useCallback((
+    phase: OAuthPopupPhase,
+    errorMessage?: string | null,
+    statusMessage?: string | null,
+  ) => {
+    const request = activeRequestRef.current;
+    if (!request) {
+      return;
+    }
+
+    clearPollTimer(request);
+    closePopupWindow(request);
 
     if (mountedRef.current) {
       setPopupState(createPopupState(request, phase, statusMessage, errorMessage));
@@ -273,8 +336,27 @@ export function usePopupOAuthController(
       return;
     }
 
+    if (data.type === 'emcy-oauth-error' && typeof data.error === 'string') {
+      const description =
+        typeof data.errorDescription === 'string'
+          ? data.errorDescription
+          : typeof data.error_description === 'string'
+            ? data.error_description
+            : 'Sign in could not be completed.';
+      setActivePopupPhase(
+        data.error === 'access_denied' ? 'canceled' : 'error',
+        description,
+      );
+      return;
+    }
+
     request.handledCallback = false;
-  }, [clearStoredCallbackPayload, exchangeCodeForToken, resolveAndClearActiveRequest]);
+  }, [
+    clearStoredCallbackPayload,
+    exchangeCodeForToken,
+    resolveAndClearActiveRequest,
+    setActivePopupPhase,
+  ]);
 
   const startOrRetryPopupAuth = useCallback(async () => {
     const request = activeRequestRef.current;
@@ -347,6 +429,29 @@ export function usePopupOAuthController(
       }
       if (effectiveAuthConfig.resource) {
         params.set('resource', effectiveAuthConfig.resource);
+      }
+      if (request.hostIdentity && isHostedMcpAuthorizeUrl(effectiveAuthConfig)) {
+        const subject = normalizeOptionalValue(request.hostIdentity.subject);
+        const email = normalizeOptionalValue(request.hostIdentity.email);
+        const organizationId = normalizeOptionalValue(request.hostIdentity.organizationId);
+        const displayName = normalizeOptionalValue(request.hostIdentity.displayName);
+
+        if (subject) {
+          params.set('emcy_host_subject', subject);
+        }
+        if (email) {
+          params.set('emcy_host_email', email);
+        }
+        if (organizationId) {
+          params.set('emcy_host_organization_id', organizationId);
+        }
+        if (displayName) {
+          params.set('emcy_host_display_name', displayName);
+        }
+        params.set(
+          'emcy_mismatch_policy',
+          optionsRef.current.embeddedAuth?.mismatchPolicy ?? 'block_with_switch',
+        );
       }
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
     } else {
@@ -481,6 +586,8 @@ export function usePopupOAuthController(
       codeVerifier: '',
       handledCallback: false,
       popupWindow: null,
+      hostIdentity: optionsRef.current.embeddedAuth?.hostIdentity,
+      hostIdentityLabel: formatHostIdentityLabel(optionsRef.current.embeddedAuth?.hostIdentity),
     };
 
     activeRequestRef.current = request;

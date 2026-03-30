@@ -22,6 +22,18 @@ export type ClientToolsMap = Record<string, ClientToolDefinition>;
 // Configuration
 // ================================================================
 
+export interface EmcyEmbeddedAuthIdentity {
+  subject?: string;
+  email?: string;
+  organizationId?: string;
+  displayName?: string;
+}
+
+export interface EmcyEmbeddedAuthConfig {
+  hostIdentity?: EmcyEmbeddedAuthIdentity;
+  mismatchPolicy: 'block_with_switch';
+}
+
 export interface EmcyAgentConfig {
   /** API key for authenticating with the Emcy API */
   apiKey: string;
@@ -54,21 +66,16 @@ export interface EmcyAgentConfig {
   getAuthToken?: () => Promise<string | undefined>;
 
   /**
-   * Callback to get the user's auth token for MCP server calls.
-   * Called every time a token is needed. Receives the MCP server URL
-   * so you can return different tokens per server.
-   * If using cookies, return undefined and set `useCookies: true`.
-   *
-   * In embedded mode, the host app provides this to supply tokens
-   * from its own auth system. The SDK does NOT cache tokens - it calls
-   * this function every time, so your app manages token refresh.
+   * Embedded popup auth settings.
+   * Use this to tell Emcy which host-app user is currently signed in so
+   * the built-in popup flow can prefer the same downstream account.
    */
-  getToken?: (mcpServerUrl?: string) => Promise<OAuthTokenResponse | string | undefined>;
+  embeddedAuth?: EmcyEmbeddedAuthConfig;
 
   /**
-   * Called when an MCP server requires authentication and no `getToken`
-   * callback is provided (standalone mode). The SDK will invoke this
-   * so the integrator can trigger a login flow (e.g., OAuth popup).
+   * Called when an MCP server requires authentication and the built-in
+   * popup flow is not being used. The SDK will invoke this so the
+   * integrator can trigger a custom login flow.
    *
    * Return the token response on success, or undefined to cancel.
    * The SDK stores the token and handles refresh automatically.

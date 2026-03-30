@@ -16,6 +16,7 @@ export interface OAuthPopupViewState {
   phase: OAuthPopupPhase;
   statusMessage?: string | null;
   errorMessage?: string | null;
+  hostIdentityLabel?: string | null;
 }
 
 export interface OAuthPopupProps extends OAuthPopupViewState {
@@ -98,9 +99,12 @@ const errorText: React.CSSProperties = {
   margin: '12px 0 0 0',
 };
 
-function getPrimaryActionLabel(phase: OAuthPopupPhase): string | null {
+function getPrimaryActionLabel(
+  phase: OAuthPopupPhase,
+  hostIdentityLabel?: string | null,
+): string | null {
   if (phase === 'prompt') {
-    return 'Sign In';
+    return hostIdentityLabel ? 'Start AI with your account' : 'Sign In';
   }
 
   if (phase === 'blocked' || phase === 'canceled' || phase === 'error') {
@@ -110,7 +114,10 @@ function getPrimaryActionLabel(phase: OAuthPopupPhase): string | null {
   return null;
 }
 
-function getDescription(phase: OAuthPopupPhase): string {
+function getDescription(
+  phase: OAuthPopupPhase,
+  hostIdentityLabel?: string | null,
+): string {
   switch (phase) {
     case 'preparing':
       return 'Preparing a secure sign-in flow for this MCP server.';
@@ -126,7 +133,9 @@ function getDescription(phase: OAuthPopupPhase): string {
       return 'Sign in could not be completed. Retry or cancel to keep using the widget.';
     case 'prompt':
     default:
-      return 'This tool requires authentication. Sign in to connect your account and enable AI to access your data.';
+      return hostIdentityLabel
+        ? `This tool will try to connect as ${hostIdentityLabel} first, then fall back to interactive sign in only if needed.`
+        : 'This tool requires authentication. Sign in to connect your account and enable AI to access your data.';
   }
 }
 
@@ -135,16 +144,20 @@ export function OAuthPopup({
   phase,
   statusMessage,
   errorMessage,
+  hostIdentityLabel,
   onPrimaryAction,
   onClose,
 }: OAuthPopupProps) {
-  const primaryActionLabel = getPrimaryActionLabel(phase);
+  const primaryActionLabel = getPrimaryActionLabel(phase, hostIdentityLabel);
 
   return (
     <div style={overlay} onClick={onClose}>
       <div style={popup} onClick={(e) => e.stopPropagation()}>
         <p style={titleStyle}>Sign in to {serverName}</p>
-        <p style={description}>{getDescription(phase)}</p>
+        <p style={description}>{getDescription(phase, hostIdentityLabel)}</p>
+        {hostIdentityLabel && phase === 'prompt' && (
+          <p style={statusText}>Current account: {hostIdentityLabel}</p>
+        )}
         <div style={buttonRow}>
           {primaryActionLabel && onPrimaryAction && (
             <button style={primaryButton} onClick={onPrimaryAction} type="button">

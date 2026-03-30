@@ -10,6 +10,7 @@ import type {
   McpAuthStatusEvent,
   McpServerAuthConfig,
   OAuthTokenResponse,
+  EmcyEmbeddedAuthIdentity,
 } from '../core/types';
 import type { McpServerStatus } from './components/McpServerStatusBar';
 import type { OAuthPopupViewState } from './components/OAuthPopup';
@@ -32,7 +33,7 @@ export interface EmcyChatContextValue {
   error: SseError | null;
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
-  hasGetToken: boolean;
+  embeddedHostIdentity: EmcyEmbeddedAuthIdentity | null;
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
   popupAuthState: OAuthPopupViewState | null;
@@ -65,7 +66,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
-  const shouldUseBuiltInPopupAuth = !config.getToken && !config.onAuthRequired;
+  const shouldUseBuiltInPopupAuth = !config.onAuthRequired;
 
   const builtInOnAuthRequiredRef = useRef<BuiltInOnAuthRequiredFn | null>(null);
   if (!builtInOnAuthRequiredRef.current) {
@@ -79,10 +80,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
 
   // Create agent once
   if (!agentRef.current) {
-    const onAuthRequired =
-      config.getToken
-        ? config.onAuthRequired
-        : (config.onAuthRequired ?? builtInOnAuthRequiredRef.current);
+    const onAuthRequired = config.onAuthRequired ?? builtInOnAuthRequiredRef.current;
 
     agentRef.current = new EmcyAgent({
       ...config,
@@ -105,6 +103,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     resolveServerName,
     oauthCallbackUrl: agent.getOAuthCallbackUrl(),
     oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
+    embeddedAuth: config.embeddedAuth,
   });
 
   popupAuthRequestRef.current = requestAuth;
@@ -249,7 +248,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         error,
         agentConfig,
         mcpServers,
-        hasGetToken: !!config.getToken,
+        embeddedHostIdentity: config.embeddedAuth?.hostIdentity ?? null,
         oauthCallbackUrl: agent.getOAuthCallbackUrl(),
         oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
         popupAuthState: shouldUseBuiltInPopupAuth ? popupState : null,

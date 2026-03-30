@@ -4,6 +4,8 @@ export type {
   ClientToolParameter,
   ClientToolsMap,
   EmcyAgentConfig,
+  EmcyEmbeddedAuthConfig,
+  EmcyEmbeddedAuthIdentity,
   ChatMessage,
   AgentConfigResponse,
   McpServerInfo,

@@ -30,7 +30,10 @@ export interface EmcyChatProps extends EmcyAgentConfig {
  * <EmcyChat
  *   apiKey="emcy_sk_xxxx_yyyy"
  *   agentId="ws_xxxxx"
- *   getToken={async (mcpServerUrl) => session.accessToken}
+ *   embeddedAuth={{
+ *     hostIdentity: { email: session.user.email ?? undefined, subject: session.user.id },
+ *     mismatchPolicy: 'block_with_switch',
+ *   }}
  *   title="AI Assistant"
  * />
  * ```
@@ -88,6 +91,7 @@ function EmcyChatInner({
     mcpServers,
     agentConfig,
     popupAuthState,
+    embeddedHostIdentity,
     startOrRetryPopupAuth,
     cancelPopupAuth,
   } =
@@ -97,6 +101,7 @@ function EmcyChatInner({
   const resolvedTitle = title ?? widgetConfig?.title ?? 'AI Assistant';
   const resolvedWelcome = welcomeMessage ?? widgetConfig?.welcomeMessage;
   const resolvedPlaceholder = placeholder ?? widgetConfig?.placeholder;
+  const mcpAuthButtonLabel = embeddedHostIdentity ? 'Start AI' : 'Needs Auth';
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
@@ -141,6 +146,7 @@ function EmcyChatInner({
           welcomeMessage={resolvedWelcome}
           placeholder={resolvedPlaceholder}
           mcpServers={mcpServers}
+          mcpAuthButtonLabel={mcpAuthButtonLabel}
           onSend={sendMessage}
           onNewConversation={newConversation}
           onMcpAuthClick={handleMcpAuthClick}
@@ -175,6 +181,7 @@ function EmcyChatInner({
             welcomeMessage={resolvedWelcome}
             placeholder={resolvedPlaceholder}
             mcpServers={mcpServers}
+            mcpAuthButtonLabel={mcpAuthButtonLabel}
             onSend={sendMessage}
             onClose={handleClose}
             onNewConversation={newConversation}

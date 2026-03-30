@@ -1,22 +1,8 @@
 # @emcy/agent-sdk
 
-Embeddable AI chat widget powered by MCP. Add an LLM-powered agent to your web app in minutes.
+Embeddable AI chat widget powered by MCP.
 
-Part of the [Emcy](https://emcy.ai) ecosystem — open source under MIT.
-
-v.0.1.0
-
----
-
-## Features
-
-- **Drop-in chat widget** — Floating or inline, ready to use
-- **MCP-powered** — Tools run via your MCP server; user auth flows browser → MCP, never through Emcy
-- **Streaming** — Real-time token streaming with thinking indicators
-- **Framework-agnostic core** — `EmcyAgent` works in any JS environment
-- **React components** — Pre-built UI or custom composition with `useEmcyAgent` hook
-
----
+The SDK is designed so embedded apps do not need to host OAuth callback routes, client metadata routes, or manage MCP tokens directly. Emcy owns the popup OAuth helper surface and brokers downstream grants server-side.
 
 ## Installation
 
@@ -24,11 +10,7 @@ v.0.1.0
 npm install @emcy/agent-sdk
 ```
 
-You need an API key and agent ID from the [Emcy dashboard](https://emcy.ai).
-
----
-
-## Quick start
+## Quick Start
 
 ### React
 
@@ -37,13 +19,23 @@ import { EmcyChat } from "@emcy/agent-sdk/react";
 
 function App() {
   return (
-    <EmcyChat
-      apiKey="emcy_sk_xxxx"
-      agentId="agent_xxxxx"
-      getToken={async () => session?.accessToken}
-      title="AI Assistant"
-      mode="floating"
-    />
+    <div style={{ height: 640 }}>
+      <EmcyChat
+        apiKey="emcy_sk_xxxx"
+        agentId="ws_xxxxx"
+        mode="inline"
+        title="AI Assistant"
+        embeddedAuth={{
+          hostIdentity: {
+            subject: currentUser.id,
+            email: currentUser.email,
+            organizationId: currentUser.organizationId,
+            displayName: currentUser.name,
+          },
+          mismatchPolicy: "block_with_switch",
+        }}
+      />
+    </div>
   );
 }
 ```
@@ -55,159 +47,93 @@ import { EmcyAgent } from "@emcy/agent-sdk";
 
 const agent = new EmcyAgent({
   apiKey: "emcy_sk_xxxx",
-  agentId: "agent_xxxxx",
-  getToken: async () => getAuthToken(),
+  agentId: "ws_xxxxx",
+  embeddedAuth: {
+    hostIdentity: {
+      subject: currentUser.id,
+      email: currentUser.email,
+    },
+    mismatchPolicy: "block_with_switch",
+  },
 });
 
 await agent.init();
-
-agent.on("message", (msg) => console.log(msg));
-agent.on("content_delta", (delta) => console.log(delta.text));
-agent.on("error", (err) => console.error(err));
-
-await agent.sendMessage("Hello!");
 ```
-
----
 
 ## Configuration
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
 | `apiKey` | `string` | Emcy API key |
-| `agentId` | `string` | Agent ID from dashboard |
-| `agentServiceUrl` | `string` | Emcy API URL (default: `https://api.emcy.ai`) |
-| `oauthCallbackUrl` | `string` | Override the Emcy-owned OAuth popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when `agentServiceUrl` is localhost. |
-| `oauthClientMetadataUrl` | `string` | Override the Emcy-owned OAuth client metadata URL used for popup OAuth. Defaults to Emcy's hosted metadata route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when `agentServiceUrl` is localhost. |
-| `getToken` | `(mcpServerUrl?: string) => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. See [Authentication](#authentication). |
-| `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Override the built-in popup auth flow when `getToken` is not provided. |
-| `useCookies` | `boolean` | Send cookies with MCP requests (default: `false`) |
-| `externalUserId` | `string` | Optional user ID for conversations |
-| `context` | `Record<string, unknown>` | Extra context sent with each message |
+| `agentId` | `string` | Workspace or agent ID |
+| `agentServiceUrl` | `string` | Emcy API URL. Defaults to `https://api.emcy.ai`. |
+| `oauthCallbackUrl` | `string` | Override Emcy's popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when running locally. |
+| `oauthClientMetadataUrl` | `string` | Override Emcy's popup client metadata URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when running locally. |
+| `embeddedAuth` | `EmcyEmbeddedAuthConfig` | Host-account hints for embedded popup auth. This is how the host app tells Emcy who the current user is without passing tokens. |
+| `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Advanced override for the built-in popup auth flow. |
+| `useCookies` | `boolean` | Send cookies with MCP requests. Defaults to `false`. |
+| `externalUserId` | `string` | Optional user identifier for conversations. |
+| `context` | `Record<string, unknown>` | Extra context sent with each message. |
 
----
+## Embedded Auth
 
-## Authentication
+Embedded MCP auth is popup-only.
 
-The SDK supports two authentication modes for MCP server calls:
+The recommended flow is:
 
-### Embedded mode (`getToken`)
+1. your app passes the current host identity through `embeddedAuth`
+2. the widget shows `Start AI` / `Start AI with your account`
+3. Emcy attempts same-account popup auth first
+4. if a downstream session already exists for that user, the popup can complete immediately
+5. if interactive login is needed, the popup stays on Emcy-owned helper routes and downstream provider pages
+6. if the downstream provider resolves a different user, Emcy blocks the mismatch and asks the user to confirm switching accounts
 
-Use this when your app already has a user session. The SDK calls your `getToken` function **every time** it needs a token — no caching, no refresh logic. Your app is responsible for session management.
+Important behavior:
 
-```tsx
-<EmcyChat
-  apiKey="..."
-  agentId="..."
-  getToken={async (mcpServerUrl) => {
-    // Return token from your session
-    // Called every time a token is needed
-    return session?.accessToken;
-  }}
-/>
+- the host app does not receive MCP access tokens
+- consumer apps do not need to host OAuth callback routes
+- consumer apps do not need to host OAuth client metadata routes
+- the popup flow survives normal React rerenders
+- the embedded flow can use the same downstream OAuth structure as the Emcy workspace product
+
+### `embeddedAuth`
+
+```ts
+type EmcyEmbeddedAuthIdentity = {
+  subject?: string;
+  email?: string;
+  organizationId?: string;
+  displayName?: string;
+};
+
+type EmcyEmbeddedAuthConfig = {
+  hostIdentity?: EmcyEmbeddedAuthIdentity;
+  mismatchPolicy: "block_with_switch";
+};
 ```
 
-The `mcpServerUrl` parameter lets you return different tokens for different MCP servers in the same workspace.
+Use `subject` when you have a stable app-specific user id. If not, `email` is the next best hint. If both the host app and downstream provider expose organization ids, include `organizationId` so Emcy can reject cross-org mismatches.
 
-**Key behavior:**
-- `getToken` is called on every tool execution
-- No SDK-side token caching — your app manages refresh
-- Return a string (access token) or `{ accessToken, refreshToken?, expiresIn? }`
-- On 401, the SDK calls `getToken` again for a fresh token
-- Clicking `Sign Out` on a connected MCP server disconnects that server inside the SDK until the user explicitly reconnects it
+## Standalone Popup Auth
 
-### Standalone mode (OAuth popup)
+If you do not pass `embeddedAuth`, the SDK still uses Emcy-owned popup OAuth for MCP servers that require auth. That keeps the hosted workspace flow and public-client embed flow on the same standards-based path.
 
-When `getToken` is not provided, the SDK handles auth via built-in OAuth popup. Clicking "Needs Auth" on an MCP server opens the OAuth flow automatically. The SDK stores tokens with expiry and handles refresh.
+If you need to fully replace the built-in popup controller, provide `onAuthRequired`.
 
-**Key behavior:**
-- SDK stores tokens in memory and localStorage
-- Checks token expiry before each use
-- Automatically refreshes using `refreshToken` if expired
-- Opens OAuth popup when no valid token exists
-- Uses Emcy-owned OAuth helper routes by default for popup callback + client metadata
-- On localhost, defaults those helper routes to `http://localhost:3100`
-- Your app does not need to host OAuth callback or client metadata routes just to embed the widget
-- Popup auth is separate from your app's own web session unless you explicitly provide `getToken`
-- Clicking `Sign Out` clears the cached OAuth token and resets the MCP session
+## React Components
 
-If you need custom standalone auth behavior, provide `onAuthRequired` and return the final token response yourself.
+- `EmcyChat` is the drop-in widget.
+- `EmcyChatProvider` + `useEmcyChatContext` let you build custom UIs.
+- `useEmcyAgent` exposes the lower-level agent hook.
 
-### Multiple MCP servers
+## Localhost Helpers
 
-Both modes support multiple MCP servers per workspace. The `mcpServerUrl` parameter identifies which server needs authentication, allowing you to return different tokens per server.
+When `agentServiceUrl` points at localhost, the SDK defaults popup helper URLs to:
 
----
+- `http://localhost:3100/oauth/callback`
+- `http://localhost:3100/.well-known/oauth-client-metadata.json`
 
-## React API
-
-### `<EmcyChat />`
-
-Drop-in widget with two visual modes:
-
-#### 1. Floating popup (default)
-
-Chatbot button in the corner; opens as an overlay. Best for support widgets on customer sites.
-
-```tsx
-<EmcyChat
-  apiKey="..."
-  agentId="..."
-  mode="floating"
-  title="AI Assistant"
-  defaultOpen={false}
-/>
-```
-
-#### 2. Inline embedded
-
-Responsive full-window chat that fills its container. Use in dashboards, sidebars, or any layout. **Parent must have defined dimensions** (e.g. `height: 400px`, `flex: 1`, or `height: 100%`).
-
-```tsx
-<div style={{ height: '500px' }}>
-  <EmcyChat
-    apiKey="..."
-    agentId="..."
-    mode="inline"
-    title="Support Chat"
-  />
-</div>
-```
-
-Or in a flex layout:
-
-```tsx
-<div className="flex flex-col h-[calc(100vh-200px)]">
-  <div className="flex-1 min-h-0">
-    <EmcyChat mode="inline" apiKey="..." agentId="..." />
-  </div>
-</div>
-```
-
-| Prop            | Type                | Description                                                       |
-| --------------- | ------------------- | ----------------------------------------------------------------- |
-| `mode`          | `'floating' \| 'inline'` | `floating` = popup overlay, `inline` = fill container (default: `floating`) |
-| `title`         | `string`            | Chat window title                                                 |
-| `welcomeMessage`| `string`            | Shown when no messages exist                                      |
-| `placeholder`   | `string`            | Input placeholder                                                 |
-| `defaultOpen`   | `boolean`           | Start open (floating mode only, default: `false`)                 |
-
-### `useEmcyAgent(config)`
-
-Hook for custom UI. Returns `messages`, `streamingContent`, `isLoading`, `isThinking`, `sendMessage`, `signOutMcpServer`, `newConversation`, `cancel`, etc.
-
-### `EmcyChatProvider` + `useEmcyChatContext`
-
-Compose your own chat UI with shared context.
-
----
-
-## Emcy ecosystem
-
-- **[emcy.ai](https://emcy.ai)** — Create and manage agents, configure MCP tools
-- **@emcy/agent-sdk** — This package — embed agents in your app
-
----
+That keeps local consumer apps clean while still exercising the real popup OAuth flow.
 
 ## License
 
