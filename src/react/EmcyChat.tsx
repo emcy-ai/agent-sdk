@@ -92,6 +92,8 @@ function EmcyChatInner({
     newConversation,
     mcpServers,
     hasGetToken,
+    oauthCallbackUrl,
+    oauthClientMetadataUrl,
   } =
     useEmcyChatContext();
 
@@ -169,6 +171,8 @@ function EmcyChatInner({
             serverName={oauthPopup.serverName}
             serverUrl={oauthPopup.serverUrl}
             authConfig={oauthPopup.authConfig}
+            oauthCallbackUrl={oauthCallbackUrl}
+            oauthClientMetadataUrl={oauthClientMetadataUrl}
             onToken={handleOAuthToken}
             onClose={() => setOauthPopup(null)}
           />
@@ -206,6 +210,8 @@ function EmcyChatInner({
               serverName={oauthPopup.serverName}
               serverUrl={oauthPopup.serverUrl}
               authConfig={oauthPopup.authConfig}
+              oauthCallbackUrl={oauthCallbackUrl}
+              oauthClientMetadataUrl={oauthClientMetadataUrl}
               onToken={handleOAuthToken}
               onClose={() => setOauthPopup(null)}
             />

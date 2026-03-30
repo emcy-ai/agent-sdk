@@ -69,6 +69,57 @@ describe('OAuthPopup', () => {
     expect(authUrl).toContain('resource=https%3A%2F%2Ftodo.example.com');
   });
 
+  it('uses the provided Emcy-owned helper URLs instead of the host app origin', async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ client_id: 'http://localhost:3100/.well-known/oauth-client-metadata.json' }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      authorizationServerUrl: 'https://auth.todo.example.com',
+      authorizationEndpoint: 'https://auth.todo.example.com/oauth/authorize',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      registrationEndpoint: 'https://auth.todo.example.com/connect/register',
+      resource: 'https://todo.example.com',
+    };
+
+    render(
+      <OAuthPopup
+        serverName="Todo MCP"
+        serverUrl="https://todo.example.com"
+        authConfig={authConfig}
+        oauthCallbackUrl="http://localhost:3100/oauth/callback"
+        oauthClientMetadataUrl="http://localhost:3100/.well-known/oauth-client-metadata.json"
+        onToken={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://auth.todo.example.com/connect/register',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    const registrationCall = fetchMock.mock.calls[0];
+    const registrationBody = JSON.parse(registrationCall?.[1]?.body as string);
+    expect(registrationBody.redirect_uris).toEqual(['http://localhost:3100/oauth/callback']);
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalled());
+    const authUrl = new URL(openSpy.mock.calls[0]?.[0] as string);
+    expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:3100/oauth/callback');
+    expect(authUrl.searchParams.get('client_id')).toBe(
+      'http://localhost:3100/.well-known/oauth-client-metadata.json',
+    );
+  });
+
   it('exchanges the authorization code with resource and resolved auth config', async () => {
     const onToken = vi.fn();
     const fetchMock = vi.mocked(globalThis.fetch);

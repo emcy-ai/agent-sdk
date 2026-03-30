@@ -12,10 +12,15 @@ export interface OAuthPopupProps {
   serverName: string;
   serverUrl: string;
   authConfig: McpServerAuthConfig;
+  oauthCallbackUrl?: string;
+  oauthClientMetadataUrl?: string;
   /** Called with the full token response (access token, refresh token, expiry) */
   onToken: (tokenResponse: OAuthTokenResponse) => void;
   onClose: () => void;
 }
+
+const OAUTH_CALLBACK_CHANNEL_NAME = 'emcy-oauth';
+const OAUTH_CALLBACK_STORAGE_PREFIX = 'emcy-oauth-callback:';
 
 function generateCodeVerifier(): string {
   const array = new Uint8Array(32);
@@ -111,25 +116,20 @@ const errorText: React.CSSProperties = {
   margin: '12px 0 0 0',
 };
 
-const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
-
-function isLocalhostHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-}
-
-function getDefaultClientMetadataUrl(): string {
-  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
-    return `${window.location.origin}/.well-known/oauth-client-metadata.json`;
-  }
-
-  return DEFAULT_OAUTH_CLIENT_METADATA_URL;
-}
-
-export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose }: OAuthPopupProps) {
+export function OAuthPopup({
+  serverName,
+  serverUrl,
+  authConfig,
+  oauthCallbackUrl,
+  oauthClientMetadataUrl,
+  onToken,
+  onClose,
+}: OAuthPopupProps) {
   const popupWindowRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const codeVerifierRef = useRef<string>('');
   const stateRef = useRef<string>('');
+  const handledCallbackRef = useRef(false);
   const resolvedAuthConfigRef = useRef<McpServerAuthConfig>(authConfig);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [popupError, setPopupError] = useState<string | null>(null);
@@ -139,8 +139,8 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
   }, [authConfig]);
 
   const getCallbackUrl = useCallback((config: McpServerAuthConfig) => (
-    config.callbackUrl ?? `${window.location.origin}/oauth/callback`
-  ), []);
+    config.callbackUrl ?? oauthCallbackUrl ?? `${window.location.origin}/oauth/callback`
+  ), [oauthCallbackUrl]);
 
   const cleanup = useCallback(() => {
     if (pollTimerRef.current) {
@@ -152,52 +152,13 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
     }
   }, []);
 
-  useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const currentCallbackUrl = getCallbackUrl(resolvedAuthConfigRef.current);
-      const callbackOrigin = new URL(currentCallbackUrl).origin;
-      if (event.origin !== callbackOrigin) {
-        return;
-      }
-
-      if (!event.data || typeof event.data !== 'object') {
-        return;
-      }
-
-      if (!stateRef.current || event.data.state !== stateRef.current) {
-        return;
-      }
-
-      // Legacy: simple token string
-      if (event.data?.type === 'emcy-oauth-callback' && event.data?.token) {
-        cleanup();
-        onToken({
-          accessToken: event.data.token,
-          resolvedAuthConfig: resolvedAuthConfigRef.current,
-        });
-      }
-      // Full token response with refresh token
-      if (event.data?.type === 'emcy-oauth-callback' && event.data?.accessToken) {
-        cleanup();
-        onToken({
-          accessToken: event.data.accessToken,
-          refreshToken: event.data.refreshToken,
-          expiresIn: event.data.expiresIn,
-          tokenType: event.data.tokenType,
-          resolvedAuthConfig: resolvedAuthConfigRef.current,
-        });
-      }
-      if (event.data?.type === 'emcy-oauth-code' && event.data?.code) {
-        exchangeCodeForToken(event.data.code);
-      }
-    };
-
-    window.addEventListener('message', handler);
-    return () => {
-      window.removeEventListener('message', handler);
-      cleanup();
-    };
-  }, [cleanup, getCallbackUrl, onToken]);
+  const clearStoredCallbackPayload = useCallback((state: string) => {
+    try {
+      localStorage.removeItem(`${OAUTH_CALLBACK_STORAGE_PREFIX}${state}`);
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
+  }, []);
 
   const exchangeCodeForToken = async (code: string) => {
     const effectiveAuthConfig = resolvedAuthConfigRef.current;
@@ -231,7 +192,6 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         const data = await response.json();
         if (data.access_token) {
           cleanup();
-          // Return full token response including refresh token
           onToken({
             accessToken: data.access_token,
             refreshToken: data.refresh_token,
@@ -250,11 +210,101 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
         );
       }
       setPopupError(errorMessage || 'Token exchange failed.');
+      setStatusMessage(null);
+      handledCallbackRef.current = false;
     } catch {
       setPopupError('Token exchange failed. Please try again.');
       setStatusMessage(null);
+      handledCallbackRef.current = false;
     }
   };
+
+  useEffect(() => {
+    const handleAuthPayload = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+
+      const data = payload as Record<string, unknown>;
+      const responseState = typeof data.state === 'string' ? data.state : '';
+      if (!stateRef.current || responseState !== stateRef.current || handledCallbackRef.current) {
+        return;
+      }
+
+      handledCallbackRef.current = true;
+      clearStoredCallbackPayload(responseState);
+
+      if (data.type === 'emcy-oauth-callback' && typeof data.token === 'string') {
+        cleanup();
+        onToken({
+          accessToken: data.token,
+          resolvedAuthConfig: resolvedAuthConfigRef.current,
+        });
+        return;
+      }
+
+      if (data.type === 'emcy-oauth-callback' && typeof data.accessToken === 'string') {
+        cleanup();
+        onToken({
+          accessToken: data.accessToken,
+          refreshToken: typeof data.refreshToken === 'string' ? data.refreshToken : undefined,
+          expiresIn: typeof data.expiresIn === 'number' ? data.expiresIn : undefined,
+          tokenType: typeof data.tokenType === 'string' ? data.tokenType : undefined,
+          resolvedAuthConfig: resolvedAuthConfigRef.current,
+        });
+        return;
+      }
+
+      if (data.type === 'emcy-oauth-code' && typeof data.code === 'string') {
+        void exchangeCodeForToken(data.code);
+        return;
+      }
+
+      handledCallbackRef.current = false;
+    };
+
+    const handler = (event: MessageEvent) => {
+      const currentCallbackUrl = getCallbackUrl(resolvedAuthConfigRef.current);
+      const callbackOrigin = new URL(currentCallbackUrl).origin;
+      if (event.origin !== callbackOrigin) {
+        return;
+      }
+
+      handleAuthPayload(event.data);
+    };
+
+    const storageHandler = (event: StorageEvent) => {
+      if (!event.key?.startsWith(OAUTH_CALLBACK_STORAGE_PREFIX) || !event.newValue) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.newValue) as Record<string, unknown>;
+        handleAuthPayload(parsed);
+      } catch {
+        // Ignore malformed callback payloads.
+      }
+    };
+
+    const channel =
+      typeof BroadcastChannel !== 'undefined'
+        ? new BroadcastChannel(OAUTH_CALLBACK_CHANNEL_NAME)
+        : null;
+    if (channel) {
+      channel.onmessage = (event) => {
+        handleAuthPayload(event.data);
+      };
+    }
+
+    window.addEventListener('message', handler);
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener('message', handler);
+      window.removeEventListener('storage', storageHandler);
+      channel?.close();
+      cleanup();
+    };
+  }, [cleanup, clearStoredCallbackPayload, getCallbackUrl, onToken]);
 
   const handleSignIn = async () => {
     setPopupError(null);
@@ -265,7 +315,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
       if (authConfig.authType === 'oauth2') {
         const registration = await resolveOAuthRegistration(authConfig, {
           callbackUrl: getCallbackUrl(authConfig),
-          oauthClientMetadataUrl: getDefaultClientMetadataUrl(),
+          oauthClientMetadataUrl,
           clientName: 'Emcy MCP Client',
           clientUri: typeof window !== 'undefined' ? window.location.origin : 'https://emcy.ai',
         });
@@ -295,6 +345,7 @@ export function OAuthPopup({ serverName, serverUrl, authConfig, onToken, onClose
     codeVerifierRef.current = codeVerifier;
     const state = crypto.randomUUID();
     stateRef.current = state;
+    handledCallbackRef.current = false;
 
     let authUrl: string;
 

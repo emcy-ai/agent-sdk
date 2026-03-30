@@ -188,6 +188,19 @@ describe('EmcyAgent auth behavior', () => {
     expect(authConfig?.manualOverrides).toEqual(['resource']);
   });
 
+  it('defaults local standalone OAuth helpers to the Emcy web origin when agentServiceUrl is localhost', () => {
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      agentServiceUrl: 'http://localhost:5150',
+    });
+
+    expect(agent.getOAuthCallbackUrl()).toBe('http://localhost:3100/oauth/callback');
+    expect(agent.getOAuthClientMetadataUrl()).toBe(
+      'http://localhost:3100/.well-known/oauth-client-metadata.json',
+    );
+  });
+
   it('sends resource and client_id on refresh token requests', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();

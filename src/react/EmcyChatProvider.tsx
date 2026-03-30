@@ -20,6 +20,8 @@ export interface EmcyChatContextValue {
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
   hasGetToken: boolean;
+  oauthCallbackUrl: string;
+  oauthClientMetadataUrl: string;
   sendMessage: (message: string) => Promise<void>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
@@ -194,6 +196,8 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         agentConfig,
         mcpServers,
         hasGetToken: !!config.getToken,
+        oauthCallbackUrl: agent.getOAuthCallbackUrl(),
+        oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
         sendMessage,
         signOutMcpServer,
         cancel,

@@ -28,6 +28,7 @@ import {
 type EventHandler<T> = (data: T) => void;
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
+const DEFAULT_LOCAL_PUBLIC_APP_PORT = '3100';
 const DEFAULT_OAUTH_CALLBACK_URL = 'https://emcy.ai/oauth/callback';
 const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
 
@@ -35,20 +36,29 @@ function isLocalhostHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
-function getDefaultOAuthCallbackUrl(): string {
-  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
-    return `${window.location.origin}/oauth/callback`;
+function getDefaultOAuthHelperOrigin(agentServiceUrl?: string): string {
+  if (!agentServiceUrl) {
+    return DEFAULT_OAUTH_CALLBACK_URL.replace(/\/oauth\/callback$/, '');
   }
 
-  return DEFAULT_OAUTH_CALLBACK_URL;
+  try {
+    const url = new URL(agentServiceUrl);
+    if (isLocalhostHost(url.hostname)) {
+      return `${url.protocol}//${url.hostname}:${DEFAULT_LOCAL_PUBLIC_APP_PORT}`;
+    }
+  } catch {
+    // Fall back to the hosted public app origin.
+  }
+
+  return DEFAULT_OAUTH_CALLBACK_URL.replace(/\/oauth\/callback$/, '');
 }
 
-function getDefaultOAuthClientMetadataUrl(): string {
-  if (typeof window !== 'undefined' && isLocalhostHost(window.location.hostname)) {
-    return `${window.location.origin}/.well-known/oauth-client-metadata.json`;
-  }
+function getDefaultOAuthCallbackUrl(agentServiceUrl?: string): string {
+  return `${getDefaultOAuthHelperOrigin(agentServiceUrl)}/oauth/callback`;
+}
 
-  return DEFAULT_OAUTH_CLIENT_METADATA_URL;
+function getDefaultOAuthClientMetadataUrl(agentServiceUrl?: string): string {
+  return `${getDefaultOAuthHelperOrigin(agentServiceUrl)}/.well-known/oauth-client-metadata.json`;
 }
 
 /** Convert client tool parameters to JSON Schema for the API */
@@ -109,9 +119,9 @@ export class EmcyAgent {
     this.config = {
       ...config,
       agentServiceUrl: config.agentServiceUrl ?? 'https://api.emcy.ai',
-      oauthCallbackUrl: config.oauthCallbackUrl ?? getDefaultOAuthCallbackUrl(),
+      oauthCallbackUrl: config.oauthCallbackUrl ?? getDefaultOAuthCallbackUrl(config.agentServiceUrl),
       oauthClientMetadataUrl:
-        config.oauthClientMetadataUrl ?? getDefaultOAuthClientMetadataUrl(),
+        config.oauthClientMetadataUrl ?? getDefaultOAuthClientMetadataUrl(config.agentServiceUrl),
     };
   }
 
@@ -323,8 +333,12 @@ export class EmcyAgent {
     return server?.authConfig ?? null;
   }
 
-  private getOAuthCallbackUrl(): string {
+  getOAuthCallbackUrl(): string {
     return this.config.oauthCallbackUrl ?? DEFAULT_OAUTH_CALLBACK_URL;
+  }
+
+  getOAuthClientMetadataUrl(): string {
+    return this.config.oauthClientMetadataUrl ?? DEFAULT_OAUTH_CLIENT_METADATA_URL;
   }
 
   private async resolveOAuthClientRegistration(
