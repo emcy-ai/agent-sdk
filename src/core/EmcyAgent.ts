@@ -1362,6 +1362,7 @@ export class EmcyAgent {
 
     const sessionId = initResponse.headers.get('mcp-session-id');
     this.mcpSessions.set(mcpServerUrl, { sessionId, authStatus: 'connected' });
+    this.updateMcpAuthStatus(mcpServerUrl, 'connected');
     await initResponse.text().catch(() => {});
 
     const notifyHeaders = this.getMcpHeaders(mcpServerUrl);

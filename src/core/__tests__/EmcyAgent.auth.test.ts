@@ -332,6 +332,83 @@ describe('EmcyAgent auth behavior', () => {
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientId).toBe('dcr-client-123');
   });
 
+  it('emits connected auth status after popup auth initializes the MCP session', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === MCP_SERVER_URL) {
+        const body = typeof init?.body === 'string' ? init.body : '';
+        const headers = init?.headers as Record<string, string> | undefined;
+
+        if (body.includes('"method":"initialize"')) {
+          expect(headers?.Authorization).toBe('Bearer popup-access-token');
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              result: {
+                protocolVersion: '2025-11-25',
+                capabilities: {},
+                serverInfo: { name: 'Todo MCP', version: '1.0.0' },
+              },
+            }),
+            {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'mcp-session-id': 'session-123',
+              },
+            },
+          );
+        }
+
+        if (body.includes('"method":"notifications/initialized"')) {
+          expect(headers?.Authorization).toBe('Bearer popup-access-token');
+          return new Response(null, { status: 202 });
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+    };
+    const onAuthRequired = vi.fn(async (): Promise<OAuthTokenResponse> => ({
+      accessToken: 'popup-access-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    }));
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      onAuthRequired,
+    });
+
+    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const events: string[] = [];
+    agent.on('mcp_auth_status', (event) => {
+      events.push(event.authStatus);
+    });
+
+    const authenticated = await agent.authenticate(MCP_SERVER_URL);
+
+    expect(authenticated).toBe(true);
+    expect(onAuthRequired).toHaveBeenCalledWith(MCP_SERVER_URL, authConfig);
+    expect(events).toContain('connected');
+    expect(agent.getMcpServers()).toEqual([{
+      url: MCP_SERVER_URL,
+      name: 'Todo MCP',
+      authStatus: 'connected',
+      canSignOut: true,
+    }]);
+  });
+
   it('signs out standalone OAuth servers by clearing local auth state', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
