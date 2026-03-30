@@ -72,15 +72,18 @@ await agent.sendMessage("Hello!");
 
 ## Configuration
 
-| Option            | Type                                 | Description                                       |
-| ----------------- | ------------------------------------ | ------------------------------------------------- |
-| `apiKey`          | `string`                             | Emcy API key                                      |
-| `agentId`         | `string`                             | Agent ID from dashboard                           |
-| `agentServiceUrl` | `string`                             | Emcy API URL (default: `https://api.emcy.ai`)     |
-| `getToken`        | `(mcpServerUrl?: string) => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. See [Authentication](#authentication). |
-| `useCookies`      | `boolean`                            | Send cookies with MCP requests (default: `false`) |
-| `externalUserId`  | `string`                             | Optional user ID for conversations                |
-| `context`         | `Record<string, unknown>`            | Extra context sent with each message              |
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `apiKey` | `string` | Emcy API key |
+| `agentId` | `string` | Agent ID from dashboard |
+| `agentServiceUrl` | `string` | Emcy API URL (default: `https://api.emcy.ai`) |
+| `oauthCallbackUrl` | `string` | Override the Emcy-owned OAuth popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when `agentServiceUrl` is localhost. |
+| `oauthClientMetadataUrl` | `string` | Override the Emcy-owned OAuth client metadata URL used for popup OAuth. Defaults to Emcy's hosted metadata route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when `agentServiceUrl` is localhost. |
+| `getToken` | `(mcpServerUrl?: string) => Promise<OAuthTokenResponse \| string \| undefined>` | User auth token for MCP tool calls. See [Authentication](#authentication). |
+| `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Override the built-in popup auth flow when `getToken` is not provided. |
+| `useCookies` | `boolean` | Send cookies with MCP requests (default: `false`) |
+| `externalUserId` | `string` | Optional user ID for conversations |
+| `context` | `Record<string, unknown>` | Extra context sent with each message |
 
 ---
 
@@ -122,7 +125,13 @@ When `getToken` is not provided, the SDK handles auth via built-in OAuth popup. 
 - Checks token expiry before each use
 - Automatically refreshes using `refreshToken` if expired
 - Opens OAuth popup when no valid token exists
+- Uses Emcy-owned OAuth helper routes by default for popup callback + client metadata
+- On localhost, defaults those helper routes to `http://localhost:3100`
+- Your app does not need to host OAuth callback or client metadata routes just to embed the widget
+- Popup auth is separate from your app's own web session unless you explicitly provide `getToken`
 - Clicking `Sign Out` clears the cached OAuth token and resets the MCP session
+
+If you need custom standalone auth behavior, provide `onAuthRequired` and return the final token response yourself.
 
 ### Multiple MCP servers
 

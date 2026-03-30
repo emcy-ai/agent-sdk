@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { EmcyAgentConfig, McpServerAuthConfig, OAuthTokenResponse } from '../core/types';
+import type { EmcyAgentConfig } from '../core/types';
 import { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
 import { ChatWindow } from './components/ChatWindow';
 import { WidgetButton } from './components/WidgetButton';
@@ -75,11 +75,6 @@ function EmcyChatInner({
 }: EmcyChatInnerProps) {
   const [animState, setAnimState] = useState<AnimState>(defaultOpen ? 'open' : 'closed');
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [oauthPopup, setOauthPopup] = useState<{
-    serverUrl: string;
-    serverName: string;
-    authConfig: McpServerAuthConfig;
-  } | null>(null);
   const {
     agent,
     messages,
@@ -91,15 +86,14 @@ function EmcyChatInner({
     signOutMcpServer,
     newConversation,
     mcpServers,
-    hasGetToken,
-    oauthCallbackUrl,
-    oauthClientMetadataUrl,
+    agentConfig,
+    popupAuthState,
+    startOrRetryPopupAuth,
+    cancelPopupAuth,
   } =
     useEmcyChatContext();
 
-  // Use widget config from agent if no explicit props
-  const ctx = useEmcyChatContext();
-  const widgetConfig = ctx.agentConfig?.widgetConfig;
+  const widgetConfig = agentConfig?.widgetConfig;
   const resolvedTitle = title ?? widgetConfig?.title ?? 'AI Assistant';
   const resolvedWelcome = welcomeMessage ?? widgetConfig?.welcomeMessage;
   const resolvedPlaceholder = placeholder ?? widgetConfig?.placeholder;
@@ -122,22 +116,8 @@ function EmcyChatInner({
     else if (animState === 'open') handleClose();
   };
 
-  const handleMcpAuthClick = (serverUrl: string, serverName: string) => {
-    if (hasGetToken) {
-      agent.authenticate(serverUrl).catch(() => {});
-    } else {
-      const authConfig = agent.getServerAuthConfig(serverUrl);
-      if (authConfig) {
-        setOauthPopup({ serverUrl, serverName, authConfig });
-      }
-    }
-  };
-
-  const handleOAuthToken = async (tokenResponse: OAuthTokenResponse) => {
-    if (oauthPopup) {
-      await agent.authenticate(oauthPopup.serverUrl, tokenResponse);
-    }
-    setOauthPopup(null);
+  const handleMcpAuthClick = (serverUrl: string, _serverName: string) => {
+    agent.authenticate(serverUrl).catch(() => {});
   };
 
   const handleMcpSignOutClick = (serverUrl: string, _serverName: string) => {
@@ -166,15 +146,11 @@ function EmcyChatInner({
           onMcpAuthClick={handleMcpAuthClick}
           onMcpSignOutClick={handleMcpSignOutClick}
         />
-        {oauthPopup && (
+        {popupAuthState && (
           <OAuthPopup
-            serverName={oauthPopup.serverName}
-            serverUrl={oauthPopup.serverUrl}
-            authConfig={oauthPopup.authConfig}
-            oauthCallbackUrl={oauthCallbackUrl}
-            oauthClientMetadataUrl={oauthClientMetadataUrl}
-            onToken={handleOAuthToken}
-            onClose={() => setOauthPopup(null)}
+            {...popupAuthState}
+            onPrimaryAction={startOrRetryPopupAuth}
+            onClose={cancelPopupAuth}
           />
         )}
       </>
@@ -205,18 +181,14 @@ function EmcyChatInner({
             onMcpAuthClick={handleMcpAuthClick}
             onMcpSignOutClick={handleMcpSignOutClick}
           />
-          {oauthPopup && (
-            <OAuthPopup
-              serverName={oauthPopup.serverName}
-              serverUrl={oauthPopup.serverUrl}
-              authConfig={oauthPopup.authConfig}
-              oauthCallbackUrl={oauthCallbackUrl}
-              oauthClientMetadataUrl={oauthClientMetadataUrl}
-              onToken={handleOAuthToken}
-              onClose={() => setOauthPopup(null)}
-            />
-          )}
         </div>
+      )}
+      {popupAuthState && (
+        <OAuthPopup
+          {...popupAuthState}
+          onPrimaryAction={startOrRetryPopupAuth}
+          onClose={cancelPopupAuth}
+        />
       )}
       <WidgetButton isOpen={isOpen} onClick={handleToggle} />
     </>

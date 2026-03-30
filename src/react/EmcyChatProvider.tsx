@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { EmcyAgent } from '../core/EmcyAgent';
 import type {
   EmcyAgentConfig,
@@ -8,8 +8,21 @@ import type {
   SseToolCall,
   SseError,
   McpAuthStatusEvent,
+  McpServerAuthConfig,
+  OAuthTokenResponse,
 } from '../core/types';
 import type { McpServerStatus } from './components/McpServerStatusBar';
+import type { OAuthPopupViewState } from './components/OAuthPopup';
+import { usePopupOAuthController } from './usePopupOAuthController';
+
+type OnAuthRequiredFn = (
+  mcpServerUrl: string,
+  authConfig: McpServerAuthConfig,
+) => Promise<OAuthTokenResponse | undefined>;
+
+type BuiltInOnAuthRequiredFn = OnAuthRequiredFn & {
+  __emcyBuiltinPopupAuth?: boolean;
+};
 
 export interface EmcyChatContextValue {
   agent: EmcyAgent;
@@ -22,6 +35,9 @@ export interface EmcyChatContextValue {
   hasGetToken: boolean;
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
+  popupAuthState: OAuthPopupViewState | null;
+  startOrRetryPopupAuth: () => void;
+  cancelPopupAuth: () => void;
   sendMessage: (message: string) => Promise<void>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
@@ -41,6 +57,7 @@ export interface EmcyChatProviderProps extends EmcyAgentConfig {
  */
 export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps) {
   const agentRef = useRef<EmcyAgent | null>(null);
+  const popupAuthRequestRef = useRef<OnAuthRequiredFn>(async () => undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -48,12 +65,49 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
+  const shouldUseBuiltInPopupAuth = !config.getToken && !config.onAuthRequired;
+
+  const builtInOnAuthRequiredRef = useRef<BuiltInOnAuthRequiredFn | null>(null);
+  if (!builtInOnAuthRequiredRef.current) {
+    builtInOnAuthRequiredRef.current = Object.assign(
+      async (mcpServerUrl: string, authConfig: McpServerAuthConfig) => (
+        popupAuthRequestRef.current(mcpServerUrl, authConfig)
+      ),
+      { __emcyBuiltinPopupAuth: true },
+    );
+  }
 
   // Create agent once
   if (!agentRef.current) {
-    agentRef.current = new EmcyAgent(config);
+    const onAuthRequired =
+      config.getToken
+        ? config.onAuthRequired
+        : (config.onAuthRequired ?? builtInOnAuthRequiredRef.current);
+
+    agentRef.current = new EmcyAgent({
+      ...config,
+      onAuthRequired,
+    });
   }
   const agent = agentRef.current;
+
+  const resolveServerName = useCallback((serverUrl: string) => {
+    const server = agent.getAgentConfig()?.mcpServers?.find((candidate) => candidate.url === serverUrl);
+    return server?.name ?? 'MCP Server';
+  }, [agent]);
+
+  const {
+    popupState,
+    requestAuth,
+    startOrRetryPopupAuth,
+    cancelPopupAuth,
+  } = usePopupOAuthController({
+    resolveServerName,
+    oauthCallbackUrl: agent.getOAuthCallbackUrl(),
+    oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
+  });
+
+  popupAuthRequestRef.current = requestAuth;
 
   useEffect(() => {
     // Subscribe to events
@@ -198,6 +252,11 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         hasGetToken: !!config.getToken,
         oauthCallbackUrl: agent.getOAuthCallbackUrl(),
         oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
+        popupAuthState: shouldUseBuiltInPopupAuth ? popupState : null,
+        startOrRetryPopupAuth: shouldUseBuiltInPopupAuth
+          ? startOrRetryPopupAuth
+          : () => {},
+        cancelPopupAuth: shouldUseBuiltInPopupAuth ? cancelPopupAuth : () => {},
         sendMessage,
         signOutMcpServer,
         cancel,

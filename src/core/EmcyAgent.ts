@@ -26,6 +26,9 @@ import {
 } from './auth/registration';
 
 type EventHandler<T> = (data: T) => void;
+type BuiltInPopupAuthHandler = {
+  __emcyBuiltinPopupAuth?: boolean;
+};
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 const DEFAULT_LOCAL_PUBLIC_APP_PORT = '3100';
@@ -973,16 +976,18 @@ export class EmcyAgent {
     // No valid token - trigger auth flow
     if (this.config.onAuthRequired) {
       if (authConfig) {
-        const resolvedAuthConfig =
-          authConfig.authType === 'oauth2'
+        const isBuiltInPopupAuth =
+          (this.config.onAuthRequired as BuiltInPopupAuthHandler).__emcyBuiltinPopupAuth === true;
+        const authConfigForHandler =
+          authConfig.authType === 'oauth2' && !isBuiltInPopupAuth
             ? await this.resolveOAuthClientRegistration(authConfig)
             : authConfig;
-        if (resolvedAuthConfig) {
-          this.updateServerAuthConfig(mcpServerUrl, resolvedAuthConfig);
+        if (authConfigForHandler) {
+          this.updateServerAuthConfig(mcpServerUrl, authConfigForHandler);
         }
         const tokenResponse = await this.config.onAuthRequired(
           mcpServerUrl,
-          resolvedAuthConfig ?? authConfig,
+          authConfigForHandler ?? authConfig,
         );
         if (tokenResponse?.accessToken) {
           if (tokenResponse.resolvedAuthConfig) {
