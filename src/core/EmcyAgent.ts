@@ -387,21 +387,44 @@ export class EmcyAgent {
     return [...candidates];
   }
 
+  private hasSameOrigin(left: string, right: string): boolean {
+    try {
+      const leftUrl = new URL(left);
+      const rightUrl = new URL(right);
+      return leftUrl.origin === rightUrl.origin;
+    } catch {
+      return false;
+    }
+  }
+
   private extractQuotedHeaderValue(header: string, key: string): string | null {
     const match = header.match(new RegExp(`${key}="([^"]+)"`, 'i'));
     return match?.[1] ?? null;
   }
 
-  private getAuthorizationServerMetadataUrl(issuerOrMetadataUrl: string): string {
-    if (issuerOrMetadataUrl.includes('/.well-known/oauth-authorization-server')) {
-      return issuerOrMetadataUrl;
+  private buildAuthorizationServerMetadataCandidates(issuerOrMetadataUrl: string): string[] {
+    const candidates = new Set<string>();
+
+    if (
+      issuerOrMetadataUrl.includes('/.well-known/oauth-authorization-server')
+      || issuerOrMetadataUrl.includes('/.well-known/openid-configuration')
+    ) {
+      candidates.add(issuerOrMetadataUrl);
+      return [...candidates];
     }
+
     const url = new URL(issuerOrMetadataUrl);
     const normalizedPath = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
     if (!normalizedPath || normalizedPath === '/') {
-      return `${url.origin}/.well-known/oauth-authorization-server`;
+      candidates.add(`${url.origin}/.well-known/oauth-authorization-server`);
+      candidates.add(`${url.origin}/.well-known/openid-configuration`);
+      return [...candidates];
     }
-    return `${url.origin}/.well-known/oauth-authorization-server${normalizedPath}`;
+
+    candidates.add(`${url.origin}/.well-known/oauth-authorization-server${normalizedPath}`);
+    candidates.add(`${url.origin}/.well-known/openid-configuration${normalizedPath}`);
+    candidates.add(`${url.origin}${normalizedPath}/.well-known/openid-configuration`);
+    return [...candidates];
   }
 
   private hasExplicitManualOverride(
@@ -565,7 +588,7 @@ export class EmcyAgent {
         const authenticateHeader = response.headers.get('www-authenticate');
         if (authenticateHeader) {
           const resourceMetadataUrl = this.extractQuotedHeaderValue(authenticateHeader, 'resource_metadata');
-          if (resourceMetadataUrl) {
+          if (resourceMetadataUrl && this.hasSameOrigin(candidate, resourceMetadataUrl)) {
             const metadataResponse = await fetch(resourceMetadataUrl, {
               method: 'GET',
               headers: { Accept: 'application/json' },
@@ -587,19 +610,33 @@ export class EmcyAgent {
       protectedResource?.authorization_server ??
       manualConfig?.authorizationServerUrl;
 
-    const metadataUrl =
-      manualConfig?.authorizationServerMetadataUrl
-      ?? (authServerUrl ? this.getAuthorizationServerMetadataUrl(authServerUrl) : null);
-
     try {
       let metadata: AuthorizationServerMetadata | null = null;
-      if (metadataUrl) {
-        const response = await fetch(metadataUrl, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (response.ok) {
-          metadata = (await response.json()) as AuthorizationServerMetadata;
+      let metadataUrl: string | null = manualConfig?.authorizationServerMetadataUrl ?? null;
+
+      const metadataCandidates = new Set<string>();
+      if (manualConfig?.authorizationServerMetadataUrl) {
+        metadataCandidates.add(manualConfig.authorizationServerMetadataUrl);
+      }
+      if (authServerUrl) {
+        for (const candidate of this.buildAuthorizationServerMetadataCandidates(authServerUrl)) {
+          metadataCandidates.add(candidate);
+        }
+      }
+
+      for (const candidate of metadataCandidates) {
+        try {
+          const response = await fetch(candidate, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (response.ok) {
+            metadata = (await response.json()) as AuthorizationServerMetadata;
+            metadataUrl = candidate;
+            break;
+          }
+        } catch {
+          // Try the next metadata candidate.
         }
       }
 

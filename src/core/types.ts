@@ -193,7 +193,7 @@ export interface AuthorizationServerMetadata {
 
 export interface OAuthDynamicClientRegistrationRequest {
   client_name: string;
-  application_type: 'web';
+  application_type: 'web' | 'native';
   redirect_uris: string[];
   grant_types: string[];
   response_types: string[];

@@ -87,6 +87,57 @@ describe('EmcyAgent auth behavior', () => {
     expect(authConfig?.resourceParameterSupported).toBe(true);
   });
 
+  it('falls back to OpenID discovery when OAuth authorization metadata is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+        return Response.json(createWorkspaceConfig({ authType: 'oauth2' }));
+      }
+
+      if (url === 'https://todo.example.com/.well-known/oauth-protected-resource') {
+        return Response.json({
+          resource: MCP_SERVER_URL,
+          authorization_servers: ['https://auth.todo.example.com/tenant'],
+          scopes_supported: ['todos.read'],
+        });
+      }
+
+      if (url === 'https://auth.todo.example.com/.well-known/oauth-authorization-server/tenant') {
+        return new Response(null, { status: 404 });
+      }
+
+      if (url === 'https://auth.todo.example.com/.well-known/openid-configuration/tenant') {
+        return Response.json({
+          issuer: 'https://auth.todo.example.com/tenant',
+          authorization_endpoint: 'https://auth.todo.example.com/oauth/authorize',
+          token_endpoint: 'https://auth.todo.example.com/oauth/token',
+          registration_endpoint: 'https://auth.todo.example.com/connect/register',
+          scopes_supported: ['todos.read'],
+          client_id_metadata_document_supported: true,
+          resource_parameter_supported: true,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+    });
+
+    await agent.init();
+
+    const authConfig = agent.getServerAuthConfig(MCP_SERVER_URL);
+    expect(authConfig?.authorizationServerUrl).toBe('https://auth.todo.example.com/tenant');
+    expect(authConfig?.authorizationServerMetadataUrl)
+      .toBe('https://auth.todo.example.com/.well-known/openid-configuration/tenant');
+    expect(authConfig?.registrationEndpoint).toBe('https://auth.todo.example.com/connect/register');
+  });
+
   it('prefers discovered resource metadata over stale stored resource values', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -399,7 +450,11 @@ describe('EmcyAgent auth behavior', () => {
     const authenticated = await agent.authenticate(MCP_SERVER_URL);
 
     expect(authenticated).toBe(true);
-    expect(onAuthRequired).toHaveBeenCalledWith(MCP_SERVER_URL, authConfig);
+    expect(onAuthRequired).toHaveBeenCalledWith(MCP_SERVER_URL, expect.objectContaining({
+      authType: 'oauth2',
+      clientMode: 'manual',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+    }));
     expect(events).toContain('connected');
     expect(agent.getMcpServers()).toEqual([{
       url: MCP_SERVER_URL,

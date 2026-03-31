@@ -164,6 +164,19 @@ function shouldAttemptMode(
   return preferred === 'auto' || preferred === candidate;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+}
+
+function inferApplicationType(callbackUrl: string): 'web' | 'native' {
+  try {
+    const url = new URL(callbackUrl);
+    return isLoopbackHost(url.hostname) ? 'native' : 'web';
+  } catch {
+    return 'web';
+  }
+}
+
 export async function registerPublicClient(
   authConfig: McpServerAuthConfig,
   options: ResolveOAuthRegistrationOptions,
@@ -186,7 +199,7 @@ export async function registerPublicClient(
 
   const requestBody: OAuthDynamicClientRegistrationRequest = {
     client_name: options.clientName ?? 'Emcy MCP Client',
-    application_type: 'web',
+    application_type: inferApplicationType(callbackUrl),
     redirect_uris: [callbackUrl],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],

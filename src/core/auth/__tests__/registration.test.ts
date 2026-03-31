@@ -86,6 +86,37 @@ describe('resolveOAuthRegistration', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('uses native application_type for loopback callback URLs during DCR', async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      expect(body.application_type).toBe('native');
+      expect(body.redirect_uris).toEqual(['http://127.0.0.1:8787/oauth/callback']);
+
+      return new Response(
+        JSON.stringify({ client_id: 'loopback-client-123' }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    });
+
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      authorizationServerUrl: 'https://auth.todo.example.com',
+      registrationEndpoint: 'https://auth.todo.example.com/connect/register',
+    };
+
+    const result = await resolveOAuthRegistration(authConfig, {
+      callbackUrl: 'http://127.0.0.1:8787/oauth/callback',
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    expect(result.mode).toBe('dcr');
+    expect(result.clientId).toBe('loopback-client-123');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to manual when no prereg, CIMD, or DCR path is available', async () => {
     const authConfig: McpServerAuthConfig = {
       authType: 'oauth2',
