@@ -25,6 +25,18 @@ type BuiltInOnAuthRequiredFn = OnAuthRequiredFn & {
   __emcyBuiltinPopupAuth?: boolean;
 };
 
+function toWorkspaceConfigError(error: unknown): SseError {
+  const message = error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : 'Failed to load workspace configuration.';
+  const isAuthError = /api key|unauthorized|401/i.test(message);
+
+  return {
+    code: isAuthError ? 'workspace_config_auth_error' : 'workspace_config_error',
+    message,
+  };
+}
+
 export interface EmcyChatContextValue {
   agent: EmcyAgent;
   messages: ChatMessage[];
@@ -211,7 +223,9 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     agent.init().then((initConfig) => {
       setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
-    }).catch(() => {});
+    }).catch((err) => {
+      setError(toWorkspaceConfigError(err));
+    });
 
     return () => {
       agent.off('message', onMessage);

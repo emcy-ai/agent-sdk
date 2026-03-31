@@ -149,6 +149,52 @@ export const welcomeText: CSSProperties = {
   maxWidth: '280px',
 };
 
+export const blockingStateCard: CSSProperties = {
+  width: '100%',
+  maxWidth: '420px',
+  padding: '20px',
+  borderRadius: '16px',
+  backgroundColor: colors.errorBg,
+  border: `1px solid ${colors.errorBorder}`,
+  boxShadow: '0 8px 24px rgba(153, 27, 27, 0.08)',
+};
+
+export const blockingStateEyebrow: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '4px 10px',
+  borderRadius: '999px',
+  backgroundColor: '#fee2e2',
+  color: colors.errorText,
+  fontSize: '11px',
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+};
+
+export const blockingStateTitle: CSSProperties = {
+  margin: '14px 0 8px',
+  fontSize: '20px',
+  lineHeight: 1.3,
+  fontWeight: 700,
+  color: colors.errorText,
+};
+
+export const blockingStateMessage: CSSProperties = {
+  margin: 0,
+  fontSize: '14px',
+  lineHeight: 1.6,
+  color: colors.errorText,
+  wordBreak: 'break-word',
+};
+
+export const blockingStateHint: CSSProperties = {
+  margin: '12px 0 0',
+  fontSize: '13px',
+  lineHeight: 1.6,
+  color: '#7f1d1d',
+};
+
 export const userBubble: CSSProperties = {
   maxWidth: '80%',
   flexShrink: 0,

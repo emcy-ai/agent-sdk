@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import type { ChatMessage } from '../../core/types';
+import type { ChatMessage, SseError } from '../../core/types';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { StreamingCursor } from './StreamingCursor';
@@ -11,9 +11,16 @@ export interface MessageListProps {
   streamingContent: string;
   welcomeMessage?: string;
   isThinking?: boolean;
+  blockingError?: SseError | null;
 }
 
-export function MessageList({ messages, streamingContent, welcomeMessage, isThinking }: MessageListProps) {
+export function MessageList({
+  messages,
+  streamingContent,
+  welcomeMessage,
+  isThinking,
+  blockingError,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages or streaming content
@@ -31,6 +38,29 @@ export function MessageList({ messages, streamingContent, welcomeMessage, isThin
 
   // Show thinking indicator when thinking, no streaming content, and no active tool call
   const showThinking = isThinking && !streamingContent && !hasActiveToolCall;
+
+  if (blockingError && visibleMessages.length === 0 && !streamingContent && !showThinking) {
+    const isAuthError = blockingError.code === 'workspace_config_auth_error';
+
+    return (
+      <div style={styles.messageList}>
+        <div style={styles.welcomeContainer}>
+          <div style={styles.blockingStateCard} role="alert" aria-live="assertive">
+            <span style={styles.blockingStateEyebrow}>Configuration error</span>
+            <h4 style={styles.blockingStateTitle}>
+              {isAuthError ? 'Embedded workspace authentication failed' : 'Unable to load workspace'}
+            </h4>
+            <p style={styles.blockingStateMessage}>{blockingError.message}</p>
+            <p style={styles.blockingStateHint}>
+              {isAuthError
+                ? 'Update the API key for this embedded workspace and reload the page.'
+                : 'Check the workspace configuration and reload the page.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (visibleMessages.length === 0 && !streamingContent && !showThinking) {
     return (

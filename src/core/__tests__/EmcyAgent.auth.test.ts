@@ -252,6 +252,30 @@ describe('EmcyAgent auth behavior', () => {
     );
   });
 
+  it('surfaces the backend error message when workspace config auth fails', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+        return Response.json(
+          { error: 'Invalid or expired API key' },
+          { status: 401 },
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+    });
+
+    await expect(agent.init()).rejects.toThrow('Invalid or expired API key');
+  });
+
   it('sends resource and client_id on refresh token requests', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();

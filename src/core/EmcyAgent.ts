@@ -64,6 +64,44 @@ function getDefaultOAuthClientMetadataUrl(agentServiceUrl?: string): string {
   return `${getDefaultOAuthHelperOrigin(agentServiceUrl)}/.well-known/oauth-client-metadata.json`;
 }
 
+function extractErrorMessage(payload: unknown): string | null {
+  if (typeof payload === 'string') {
+    const message = payload.trim();
+    return message || null;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ['error', 'message', 'detail']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+async function getResponseErrorMessage(response: Response): Promise<string> {
+  const fallback = `HTTP ${response.status}`;
+
+  try {
+    const payload = await response.clone().json();
+    const message = extractErrorMessage(payload);
+    if (message) {
+      return message;
+    }
+  } catch {
+    // Fall through to plain text below.
+  }
+
+  const text = await response.text().catch(() => '');
+  return text.trim() || fallback;
+}
+
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
   const properties: Record<string, object> = {};
@@ -149,8 +187,7 @@ export class EmcyAgent {
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Failed to fetch workspace config' }));
-      throw new Error(error.message ?? `HTTP ${response.status}`);
+      throw new Error(await getResponseErrorMessage(response));
     }
 
     this.agentConfig = await response.json();
@@ -1168,8 +1205,7 @@ export class EmcyAgent {
     );
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
-      throw new Error(error.error ?? error.message ?? `HTTP ${response.status}`);
+      throw new Error(await getResponseErrorMessage(response));
     }
 
     return response;

@@ -48,6 +48,8 @@ export function ChatWindow({
   variant = 'floating',
 }: ChatWindowProps) {
   const containerStyle = variant === 'inline' ? styles.chatWindowInline : styles.chatWindow;
+  const blockingError = error && error.code.startsWith('workspace_config_') ? error : null;
+
   return (
     <div style={containerStyle}>
       <StyleInjector />
@@ -95,10 +97,11 @@ export function ChatWindow({
         streamingContent={streamingContent}
         welcomeMessage={welcomeMessage}
         isThinking={isThinking}
+        blockingError={blockingError}
       />
 
       {/* Error banner */}
-      {error && (
+      {error && !blockingError && (
         <div style={styles.errorCard}>
           {error.message || 'Something went wrong. Please try again.'}
         </div>
@@ -107,8 +110,12 @@ export function ChatWindow({
       {/* Input */}
       <InputArea
         onSend={onSend}
-        disabled={isLoading}
-        placeholder={placeholder}
+        disabled={isLoading || Boolean(blockingError)}
+        placeholder={
+          blockingError
+            ? 'Embedded workspace unavailable'
+            : placeholder
+        }
       />
 
       {/* Powered by */}
