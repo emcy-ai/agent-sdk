@@ -15,33 +15,36 @@ export interface EnhancedToolCallCardProps {
 const cardColors = {
   calling: {
     surface: '#ffffff',
-    border: '#dbeafe',
+    border: '#e4e4e7',
     accent: '#2563eb',
-    mutedSurface: '#eff6ff',
+    mutedSurface: '#f8fafc',
     mutedText: '#1d4ed8',
-    detailSurface: '#f8fbff',
-    detailText: '#1e3a8a',
-    shadow: 'rgba(37, 99, 235, 0.12)',
+    badgeSurface: '#eff6ff',
+    detailSurface: '#f8fafc',
+    detailText: '#0f172a',
+    shadow: 'rgba(15, 23, 42, 0.06)',
   },
   completed: {
     surface: '#ffffff',
-    border: '#bbf7d0',
+    border: '#e4e4e7',
     accent: '#16a34a',
-    mutedSurface: '#f0fdf4',
+    mutedSurface: '#fafafa',
     mutedText: '#166534',
-    detailSurface: '#f6fef8',
-    detailText: '#14532d',
-    shadow: 'rgba(22, 163, 74, 0.12)',
+    badgeSurface: '#ecfdf5',
+    detailSurface: '#fafafa',
+    detailText: '#18181b',
+    shadow: 'rgba(15, 23, 42, 0.06)',
   },
   error: {
     surface: '#ffffff',
-    border: '#fecaca',
+    border: '#e4e4e7',
     accent: '#dc2626',
-    mutedSurface: '#fef2f2',
+    mutedSurface: '#fafafa',
     mutedText: '#991b1b',
-    detailSurface: '#fff5f5',
+    badgeSurface: '#fef2f2',
+    detailSurface: '#fff7f7',
     detailText: '#7f1d1d',
-    shadow: 'rgba(220, 38, 38, 0.12)',
+    shadow: 'rgba(15, 23, 42, 0.06)',
   },
 };
 
@@ -76,6 +79,34 @@ function buildErrorDetails(error?: string) {
   }
 
   return error;
+}
+
+function AnimatedEllipsis({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+      }}
+    >
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          style={{
+            width: 4,
+            height: 4,
+            borderRadius: 999,
+            backgroundColor: color,
+            opacity: 0.35,
+            animation: 'emcy-pulse 1.2s ease-in-out infinite',
+            animationDelay: `${index * 0.16}s`,
+          }}
+        />
+      ))}
+    </span>
+  );
 }
 
 export function EnhancedToolCallCard({
@@ -118,127 +149,108 @@ export function EnhancedToolCallCard({
         : error?.toLowerCase().includes('fetch')
           ? `Network error after ${durationStr}`
           : `Failed after ${durationStr}`;
-  const detailLabel = status === 'error' ? 'error' : 'result';
+  const detailLabel = status === 'error' ? 'details' : 'result';
   const statusIcon =
     status === 'calling' ? (
-      <SpinnerIcon size={18} color={c.accent} />
+      <SpinnerIcon size={14} color={c.accent} />
     ) : status === 'completed' ? (
-      <CheckCircleIcon size={18} color={c.accent} />
+      <CheckCircleIcon size={14} color={c.accent} />
     ) : (
-      <XCircleIcon size={18} color={c.accent} />
+      <XCircleIcon size={14} color={c.accent} />
     );
 
   return (
     <div
       className="emcy-fadeInUp"
       style={{
-        width: '100%',
+        width: expanded ? '92%' : 'fit-content',
         maxWidth: '92%',
         flexShrink: 0,
-        borderRadius: 16,
+        borderRadius: 18,
         backgroundColor: c.surface,
         border: `1px solid ${c.border}`,
         alignSelf: 'flex-start',
         overflow: 'hidden',
-        boxShadow: `0 14px 30px ${c.shadow}`,
+        boxShadow: `0 1px 2px rgba(15,23,42,0.06), 0 12px 34px ${c.shadow}`,
         position: 'relative',
-        transition: 'border-color 0.2s, box-shadow 0.2s, transform 0.2s',
+        transition: 'width 0.2s ease, border-color 0.2s, box-shadow 0.2s, transform 0.2s',
       }}
     >
       <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: `linear-gradient(135deg, ${c.mutedSurface} 0%, rgba(255,255,255,0) 45%)`,
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: 0,
-          height: 3,
-          background: `linear-gradient(90deg, ${c.accent} 0%, ${c.border} 100%)`,
-        }}
-      />
-
-      <div
         style={{
           position: 'relative',
-          padding: '14px 16px 12px',
+          padding: '10px 12px',
           display: 'flex',
-          alignItems: 'flex-start',
-          gap: 12,
+          alignItems: 'center',
+          gap: 10,
         }}
       >
         <div
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
+            width: 28,
+            height: 28,
+            borderRadius: 999,
             backgroundColor: c.mutedSurface,
-            border: `1px solid ${c.border}`,
+            border: `1px solid ${colors.border}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
           }}
         >
-          <ToolIcon size={18} color={c.accent} />
+          <ToolIcon size={14} color={c.accent} />
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: colors.textMuted,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Tool call
-          </div>
-
-          <div
-            style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
+              minWidth: 0,
               flexWrap: 'wrap',
             }}
           >
-            <div
-              style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: colors.text,
-                lineHeight: 1.3,
-                minWidth: 0,
-                wordBreak: 'break-word',
-              }}
-            >
-              {toolName}
-            </div>
             <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                padding: '3px 10px',
+                gap: 6,
+                minWidth: 0,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: colors.text,
+                  lineHeight: 1.35,
+                  minWidth: 0,
+                  wordBreak: 'break-word',
+                }}
+              >
+                {toolName}
+              </span>
+              {status === 'calling' ? (
+                <AnimatedEllipsis color={c.accent} />
+              ) : null}
+            </span>
+
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '3px 8px',
                 borderRadius: 999,
-                backgroundColor: c.mutedSurface,
-                border: `1px solid ${c.border}`,
+                backgroundColor: c.badgeSurface,
                 color: c.mutedText,
                 fontSize: 11,
                 fontWeight: 600,
               }}
             >
+              {statusIcon}
               {statusLabel}
             </span>
           </div>
@@ -249,79 +261,89 @@ export function EnhancedToolCallCard({
               flexWrap: 'wrap',
               alignItems: 'center',
               gap: 6,
-              marginTop: 8,
+              marginTop: 4,
             }}
           >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: colors.textMuted,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Tool call
+            </span>
             {runId && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  backgroundColor: colors.bgSecondary,
-                  border: `1px solid ${colors.border}`,
-                  color: colors.textSecondary,
-                  fontSize: 11,
-                  fontFamily: '"SF Mono", "Fira Code", monospace',
-                }}
-              >
-                {runId}
-              </span>
+              <>
+                <span style={{ color: colors.textMuted, fontSize: 11 }}>•</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                    fontFamily: '"SF Mono", "Fira Code", monospace',
+                  }}
+                >
+                  {runId}
+                </span>
+              </>
             )}
-            <span style={{ fontSize: 12, color: colors.textSecondary }}>{statusText}</span>
+            <span style={{ color: colors.textMuted, fontSize: 11 }}>•</span>
+            <span style={{ fontSize: 11, color: colors.textSecondary }}>
+              {statusText}
+            </span>
           </div>
         </div>
 
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 999,
-            backgroundColor: c.mutedSurface,
-            border: `1px solid ${c.border}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          {statusIcon}
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: 'relative',
-          margin: '0 16px 12px',
-          height: 6,
-          borderRadius: 999,
-          backgroundColor: c.mutedSurface,
-          border: `1px solid ${c.border}`,
-          overflow: 'hidden',
-        }}
-      >
-        {status === 'calling' ? (
-          <div
+        {hasExpandable && (
+          <button
+            onClick={() => setExpanded(!expanded)}
             style={{
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              width: '35%',
-              height: '100%',
-              background: `linear-gradient(90deg, ${c.accent} 0%, ${c.mutedText} 100%)`,
-              animation: 'emcy-progressIndeterminate 1.5s ease-in-out infinite',
+              width: 28,
+              height: 28,
               borderRadius: 999,
+              border: `1px solid ${colors.border}`,
+              backgroundColor: expanded ? c.badgeSurface : colors.bgSecondary,
+              color: colors.textSecondary,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              cursor: 'pointer',
             }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              background: `linear-gradient(90deg, ${c.accent} 0%, ${c.mutedText} 100%)`,
-            }}
-          />
+            type="button"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Hide ${detailLabel}` : `Show ${detailLabel}`}
+            title={expanded ? `Hide ${detailLabel}` : `Show ${detailLabel}`}
+          >
+            {expanded ? (
+              <ChevronIcon size={14} direction="up" color={colors.textSecondary} />
+            ) : (
+              <span
+                aria-hidden="true"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 2,
+                }}
+              >
+                {[0, 1, 2].map((index) => (
+                  <span
+                    key={index}
+                    style={{
+                      width: 3.5,
+                      height: 3.5,
+                      borderRadius: 999,
+                      backgroundColor: colors.textSecondary,
+                    }}
+                  />
+                ))}
+              </span>
+            )}
+          </button>
         )}
       </div>
 
@@ -330,60 +352,14 @@ export function EnhancedToolCallCard({
           style={{
             position: 'relative',
             borderTop: `1px solid ${c.border}`,
-            backgroundColor: c.mutedSurface,
+            backgroundColor: c.surface,
           }}
         >
-          <button
-            onClick={() => setExpanded(!expanded)}
-            style={{
-              width: '100%',
-              padding: '10px 16px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              color: colors.text,
-            }}
-            type="button"
-            aria-expanded={expanded}
-          >
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                minWidth: 0,
-              }}
-            >
-              <ChevronIcon size={14} direction={expanded ? 'up' : 'down'} color={colors.textSecondary} />
-              <span style={{ fontSize: 12, fontWeight: 600 }}>
-                {expanded ? `Hide ${detailLabel}` : `Show ${detailLabel}`}
-              </span>
-            </span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '2px 8px',
-                borderRadius: 999,
-                backgroundColor: c.surface,
-                border: `1px solid ${c.border}`,
-                color: colors.textSecondary,
-                fontSize: 11,
-              }}
-            >
-              {status === 'error' ? 'Details' : 'Output'}
-            </span>
-          </button>
-
           {expanded && (
             <div
               style={{
-                padding: '0 16px 16px',
-                maxHeight: 220,
+                padding: '12px',
+                maxHeight: 260,
                 overflowY: 'auto',
                 animation: 'emcy-slideDown 0.2s ease-out',
               }}
@@ -391,14 +367,38 @@ export function EnhancedToolCallCard({
               <div
                 style={{
                   marginBottom: 8,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: colors.textMuted,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
                 }}
               >
-                {status === 'error' ? 'Error output' : 'Tool output'}
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: colors.textMuted,
+                  }}
+                >
+                  {status === 'error' ? 'Error output' : 'Tool output'}
+                </div>
+                <button
+                  onClick={() => setExpanded(false)}
+                  type="button"
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    color: colors.textSecondary,
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    padding: 0,
+                  }}
+                >
+                  Hide
+                </button>
               </div>
               <pre
                 style={{
@@ -408,12 +408,11 @@ export function EnhancedToolCallCard({
                   backgroundColor: c.detailSurface,
                   border: `1px solid ${c.border}`,
                   padding: '10px 12px',
-                  borderRadius: 10,
+                  borderRadius: 12,
                   margin: 0,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   lineHeight: 1.4,
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.65)',
                 }}
               >
                 {detailText}
