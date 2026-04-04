@@ -14,27 +14,73 @@ export interface EnhancedToolCallCardProps {
 
 const cardColors = {
   calling: {
-    bg: '#f0f4ff',
-    border: '#c7d2fe',
-    accent: colors.primary,
-    text: '#3730a3',
+    surface: '#ffffff',
+    border: '#dbeafe',
+    accent: '#2563eb',
+    mutedSurface: '#eff6ff',
+    mutedText: '#1d4ed8',
+    detailSurface: '#f8fbff',
+    detailText: '#1e3a8a',
+    shadow: 'rgba(37, 99, 235, 0.12)',
   },
   completed: {
-    bg: '#f0fdf4',
+    surface: '#ffffff',
     border: '#bbf7d0',
     accent: '#16a34a',
-    text: '#166534',
+    mutedSurface: '#f0fdf4',
+    mutedText: '#166534',
+    detailSurface: '#f6fef8',
+    detailText: '#14532d',
+    shadow: 'rgba(22, 163, 74, 0.12)',
   },
   error: {
-    bg: '#fef2f2',
+    surface: '#ffffff',
     border: '#fecaca',
     accent: '#dc2626',
-    text: '#991b1b',
+    mutedSurface: '#fef2f2',
+    mutedText: '#991b1b',
+    detailSurface: '#fff5f5',
+    detailText: '#7f1d1d',
+    shadow: 'rgba(220, 38, 38, 0.12)',
   },
 };
 
+function formatDuration(ms: number) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function shortToolCallId(toolCallId: string) {
+  return toolCallId ? `#${toolCallId.slice(0, 8)}` : null;
+}
+
+function formatToolDetails(value?: string) {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object') {
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    // Keep raw output when the payload is plain text.
+  }
+
+  return value;
+}
+
+function buildErrorDetails(error?: string) {
+  if (!error) return null;
+
+  if (error.toLowerCase().includes('fetch')) {
+    return `${error}\n\nTip: Ensure MCP Server URL is set to http://localhost:3001/mcp (or your MCP server URL) in Dashboard -> MCP Servers -> [server] -> Settings.`;
+  }
+
+  return error;
+}
+
 export function EnhancedToolCallCard({
   toolName,
+  toolCallId,
   status,
   startTime,
   duration,
@@ -57,86 +103,201 @@ export function EnhancedToolCallCard({
   const c = cardColors[status];
   const ToolIcon = getToolIcon(toolName);
   const displayDuration = status === 'calling' ? elapsed : (duration ?? 0);
-  const durationStr = (displayDuration / 1000).toFixed(1) + 's';
-  const hasExpandable = (status === 'completed' && result) || (status === 'error' && error);
+  const durationStr = formatDuration(displayDuration);
+  const detailText =
+    status === 'error' ? buildErrorDetails(error) : formatToolDetails(result);
+  const hasExpandable = Boolean(detailText);
+  const runId = shortToolCallId(toolCallId);
+  const statusLabel =
+    status === 'calling' ? 'Running' : status === 'completed' ? 'Completed' : 'Failed';
+  const statusText =
+    status === 'calling'
+      ? `Working for ${durationStr}`
+      : status === 'completed'
+        ? `Completed in ${durationStr}`
+        : error?.toLowerCase().includes('fetch')
+          ? `Network error after ${durationStr}`
+          : `Failed after ${durationStr}`;
+  const detailLabel = status === 'error' ? 'error' : 'result';
+  const statusIcon =
+    status === 'calling' ? (
+      <SpinnerIcon size={18} color={c.accent} />
+    ) : status === 'completed' ? (
+      <CheckCircleIcon size={18} color={c.accent} />
+    ) : (
+      <XCircleIcon size={18} color={c.accent} />
+    );
 
   return (
     <div
       className="emcy-fadeInUp"
       style={{
         width: '100%',
-        maxWidth: '90%',
+        maxWidth: '92%',
         flexShrink: 0,
-        borderRadius: 10,
-        backgroundColor: c.bg,
+        borderRadius: 16,
+        backgroundColor: c.surface,
         border: `1px solid ${c.border}`,
-        borderLeft: `3px solid ${c.accent}`,
         alignSelf: 'flex-start',
         overflow: 'hidden',
-        transition: 'background-color 0.3s, border-color 0.3s',
+        boxShadow: `0 14px 30px ${c.shadow}`,
+        position: 'relative',
+        transition: 'border-color 0.2s, box-shadow 0.2s, transform 0.2s',
       }}
     >
-      {/* Header */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: `linear-gradient(135deg, ${c.mutedSurface} 0%, rgba(255,255,255,0) 45%)`,
+          pointerEvents: 'none',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          height: 3,
+          background: `linear-gradient(90deg, ${c.accent} 0%, ${c.border} 100%)`,
+        }}
+      />
+
       <div
         style={{
-          padding: '10px 14px',
+          position: 'relative',
+          padding: '14px 16px 12px',
           display: 'flex',
-          alignItems: 'center',
-          gap: 10,
+          alignItems: 'flex-start',
+          gap: 12,
         }}
       >
-        {/* Tool icon */}
         <div
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            backgroundColor: `${c.accent}15`,
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: c.mutedSurface,
+            border: `1px solid ${c.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+          }}
+        >
+          <ToolIcon size={18} color={c.accent} />
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: colors.textMuted,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
+            Tool call
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: colors.text,
+                lineHeight: 1.3,
+                minWidth: 0,
+                wordBreak: 'break-word',
+              }}
+            >
+              {toolName}
+            </div>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 10px',
+                borderRadius: 999,
+                backgroundColor: c.mutedSurface,
+                border: `1px solid ${c.border}`,
+                color: c.mutedText,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {statusLabel}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 8,
+            }}
+          >
+            {runId && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  backgroundColor: colors.bgSecondary,
+                  border: `1px solid ${colors.border}`,
+                  color: colors.textSecondary,
+                  fontSize: 11,
+                  fontFamily: '"SF Mono", "Fira Code", monospace',
+                }}
+              >
+                {runId}
+              </span>
+            )}
+            <span style={{ fontSize: 12, color: colors.textSecondary }}>{statusText}</span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 999,
+            backgroundColor: c.mutedSurface,
+            border: `1px solid ${c.border}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
           }}
         >
-          <ToolIcon size={16} color={c.accent} />
-        </div>
-
-        {/* Name + status */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: c.text,
-              fontFamily: '"SF Mono", "Fira Code", monospace',
-            }}
-          >
-            {toolName}
-          </div>
-          <div style={{ fontSize: 12, color: c.text, opacity: 0.7, marginTop: 1 }}>
-            {status === 'calling' && `Executing... ${durationStr}`}
-            {status === 'completed' && `Completed in ${durationStr}`}
-            {status === 'error' &&
-              (error?.toLowerCase().includes('fetch')
-                ? `Network error (${durationStr}) — check MCP Server URL in Dashboard`
-                : `Failed after ${durationStr}`)}
-          </div>
-        </div>
-
-        {/* Status icon */}
-        <div style={{ flexShrink: 0 }}>
-          {status === 'calling' && <SpinnerIcon size={18} color={c.accent} />}
-          {status === 'completed' && <CheckCircleIcon size={18} color={c.accent} />}
-          {status === 'error' && <XCircleIcon size={18} color={c.accent} />}
+          {statusIcon}
         </div>
       </div>
 
-      {/* Progress bar */}
       <div
         style={{
-          height: 2,
-          backgroundColor: `${c.accent}20`,
           position: 'relative',
+          margin: '0 16px 12px',
+          height: 6,
+          borderRadius: 999,
+          backgroundColor: c.mutedSurface,
+          border: `1px solid ${c.border}`,
           overflow: 'hidden',
         }}
       >
@@ -145,11 +306,12 @@ export function EnhancedToolCallCard({
             style={{
               position: 'absolute',
               top: 0,
-              width: '30%',
+              bottom: 0,
+              width: '35%',
               height: '100%',
-              backgroundColor: c.accent,
+              background: `linear-gradient(90deg, ${c.accent} 0%, ${c.mutedText} 100%)`,
               animation: 'emcy-progressIndeterminate 1.5s ease-in-out infinite',
-              borderRadius: 1,
+              borderRadius: 999,
             }}
           />
         ) : (
@@ -157,65 +319,104 @@ export function EnhancedToolCallCard({
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: c.accent,
-              transition: 'width 0.3s ease-out',
+              background: `linear-gradient(90deg, ${c.accent} 0%, ${c.mutedText} 100%)`,
             }}
           />
         )}
       </div>
 
-      {/* Expandable result/error */}
       {hasExpandable && (
-        <div style={{ borderTop: `1px solid ${c.border}` }}>
+        <div
+          style={{
+            position: 'relative',
+            borderTop: `1px solid ${c.border}`,
+            backgroundColor: c.mutedSurface,
+          }}
+        >
           <button
             onClick={() => setExpanded(!expanded)}
             style={{
               width: '100%',
-              padding: '6px 14px',
+              padding: '10px 16px',
               background: 'none',
               border: 'none',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              fontSize: 12,
-              color: c.text,
-              opacity: 0.7,
+              justifyContent: 'space-between',
+              gap: 12,
+              color: colors.text,
             }}
+            type="button"
+            aria-expanded={expanded}
           >
-            <ChevronIcon size={12} direction={expanded ? 'up' : 'down'} color={c.text} />
-            {expanded ? 'Hide result' : status === 'error' ? 'Show error' : 'Show result'}
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                minWidth: 0,
+              }}
+            >
+              <ChevronIcon size={14} direction={expanded ? 'up' : 'down'} color={colors.textSecondary} />
+              <span style={{ fontSize: 12, fontWeight: 600 }}>
+                {expanded ? `Hide ${detailLabel}` : `Show ${detailLabel}`}
+              </span>
+            </span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 8px',
+                borderRadius: 999,
+                backgroundColor: c.surface,
+                border: `1px solid ${c.border}`,
+                color: colors.textSecondary,
+                fontSize: 11,
+              }}
+            >
+              {status === 'error' ? 'Details' : 'Output'}
+            </span>
           </button>
 
           {expanded && (
             <div
               style={{
-                padding: '0 14px 10px',
-                maxHeight: 200,
+                padding: '0 16px 16px',
+                maxHeight: 220,
                 overflowY: 'auto',
                 animation: 'emcy-slideDown 0.2s ease-out',
               }}
             >
+              <div
+                style={{
+                  marginBottom: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: colors.textMuted,
+                }}
+              >
+                {status === 'error' ? 'Error output' : 'Tool output'}
+              </div>
               <pre
                 style={{
                   fontSize: 11,
                   fontFamily: '"SF Mono", "Fira Code", monospace',
-                  color: status === 'error' ? c.text : '#334155',
-                  backgroundColor: status === 'error' ? '#fee2e2' : '#f8fafc',
-                  padding: '8px 10px',
-                  borderRadius: 6,
+                  color: c.detailText,
+                  backgroundColor: c.detailSurface,
+                  border: `1px solid ${c.border}`,
+                  padding: '10px 12px',
+                  borderRadius: 10,
                   margin: 0,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   lineHeight: 1.4,
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.65)',
                 }}
               >
-                {status === 'error'
-                  ? error +
-                    (error?.toLowerCase().includes('fetch')
-                      ? '\n\nTip: Ensure MCP Server URL is set to http://localhost:3001/mcp (or your MCP server URL) in Dashboard → MCP Servers → [server] → Settings.'
-                      : '')
-                  : result}
+                {detailText}
               </pre>
             </div>
           )}

@@ -6,22 +6,22 @@ import type { CSSProperties } from 'react';
  */
 
 export const colors = {
-  primary: '#6366f1',
-  primaryHover: '#4f46e5',
+  primary: '#059669',
+  primaryHover: '#047857',
   bg: '#ffffff',
-  bgSecondary: '#f9fafb',
-  bgTertiary: '#f3f4f6',
-  text: '#111827',
-  textSecondary: '#6b7280',
-  textMuted: '#9ca3af',
-  border: '#e5e7eb',
-  userBubble: '#6366f1',
+  bgSecondary: '#fafafa',
+  bgTertiary: '#f4f4f5',
+  text: '#09090b',
+  textSecondary: '#71717a',
+  textMuted: '#a1a1aa',
+  border: '#e4e4e7',
+  userBubble: '#059669',
   userText: '#ffffff',
-  assistantBubble: '#f3f4f6',
-  assistantText: '#111827',
-  toolBg: '#fef3c7',
-  toolText: '#92400e',
-  toolBorder: '#fcd34d',
+  assistantBubble: '#f4f4f5',
+  assistantText: '#09090b',
+  toolBg: '#ecfdf5',
+  toolText: '#065f46',
+  toolBorder: '#a7f3d0',
   errorBg: '#fef2f2',
   errorText: '#991b1b',
   errorBorder: '#fecaca',
@@ -41,7 +41,7 @@ export const widgetButton: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 4px 16px rgba(99,102,241,0.35)',
+  boxShadow: '0 4px 16px rgba(5,150,105,0.35)',
   zIndex: 9998,
   transition: 'background-color 0.2s, transform 0.2s, box-shadow 0.2s',
 };
@@ -54,10 +54,11 @@ export const chatWindow: CSSProperties = {
   width: '400px',
   height: '600px',
   maxHeight: 'calc(100vh - 120px)',
-  borderRadius: '16px',
+  minHeight: 0,
+  borderRadius: '12px',
   backgroundColor: colors.bg,
   border: `1px solid ${colors.border}`,
-  boxShadow: '0 12px 40px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.06)',
+  boxShadow: '0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
@@ -89,7 +90,7 @@ export const chatWindowInline: CSSProperties = {
 };
 
 export const chatHeader: CSSProperties = {
-  padding: '16px 20px',
+  padding: '12px 16px',
   borderBottom: `1px solid ${colors.border}`,
   display: 'flex',
   alignItems: 'center',
@@ -99,10 +100,11 @@ export const chatHeader: CSSProperties = {
 };
 
 export const chatHeaderTitle: CSSProperties = {
-  fontSize: '16px',
+  fontSize: '14px',
   fontWeight: 600,
   color: colors.text,
   margin: 0,
+  letterSpacing: '-0.01em',
 };
 
 export const headerActions: CSSProperties = {
@@ -125,11 +127,13 @@ export const iconButton: CSSProperties = {
 
 export const messageList: CSSProperties = {
   flex: 1,
+  minHeight: 0,
   overflowY: 'auto',
-  padding: '16px',
+  overscrollBehavior: 'contain',
+  padding: '12px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '12px',
+  gap: '8px',
 };
 
 export const welcomeContainer: CSSProperties = {
@@ -138,15 +142,15 @@ export const welcomeContainer: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   flex: 1,
-  padding: '32px',
+  padding: '24px',
   textAlign: 'center',
 };
 
 export const welcomeText: CSSProperties = {
-  fontSize: '15px',
-  color: colors.textSecondary,
-  lineHeight: 1.5,
-  maxWidth: '280px',
+  fontSize: '13px',
+  color: colors.textMuted,
+  lineHeight: 1.6,
+  maxWidth: '240px',
 };
 
 export const blockingStateCard: CSSProperties = {
@@ -198,26 +202,25 @@ export const blockingStateHint: CSSProperties = {
 export const userBubble: CSSProperties = {
   maxWidth: '80%',
   flexShrink: 0,
-  padding: '10px 14px',
-  borderRadius: '16px 16px 4px 16px',
+  padding: '8px 12px',
+  borderRadius: '10px 10px 2px 10px',
   backgroundColor: colors.userBubble,
   color: colors.userText,
   alignSelf: 'flex-end',
-  fontSize: '14px',
+  fontSize: '13px',
   lineHeight: 1.5,
   wordBreak: 'break-word',
-  boxShadow: '0 1px 3px rgba(99,102,241,0.2)',
 };
 
 export const assistantBubble: CSSProperties = {
   maxWidth: '85%',
   flexShrink: 0,
-  padding: '10px 14px',
-  borderRadius: '16px 16px 16px 4px',
+  padding: '8px 12px',
+  borderRadius: '10px 10px 10px 2px',
   backgroundColor: colors.assistantBubble,
   color: colors.assistantText,
   alignSelf: 'flex-start',
-  fontSize: '14px',
+  fontSize: '13px',
   lineHeight: 1.5,
   wordBreak: 'break-word',
 };
@@ -227,14 +230,14 @@ export const streamingBubble: CSSProperties = {
 };
 
 export const toolCallCard: CSSProperties = {
-  maxWidth: '80%',
-  padding: '8px 12px',
-  borderRadius: '8px',
+  maxWidth: '85%',
+  padding: '6px 10px',
+  borderRadius: '6px',
   backgroundColor: colors.toolBg,
   border: `1px solid ${colors.toolBorder}`,
   color: colors.toolText,
   alignSelf: 'flex-start',
-  fontSize: '13px',
+  fontSize: '12px',
   display: 'flex',
   alignItems: 'center',
   gap: '6px',
@@ -259,7 +262,7 @@ export const errorCard: CSSProperties = {
 };
 
 export const inputArea: CSSProperties = {
-  padding: '12px 16px',
+  padding: '10px 12px',
   borderTop: `1px solid ${colors.border}`,
   display: 'flex',
   gap: '8px',
@@ -270,11 +273,11 @@ export const inputArea: CSSProperties = {
 
 export const textInput: CSSProperties = {
   flex: 1,
-  padding: '10px 14px',
-  borderRadius: '12px',
+  padding: '8px 12px',
+  borderRadius: '6px',
   border: `1px solid ${colors.border}`,
-  backgroundColor: colors.bgSecondary,
-  fontSize: '14px',
+  backgroundColor: colors.bg,
+  fontSize: '13px',
   color: colors.text,
   outline: 'none',
   resize: 'none',
@@ -284,27 +287,31 @@ export const textInput: CSSProperties = {
 };
 
 export const sendButton: CSSProperties = {
-  padding: '10px 16px',
-  borderRadius: '12px',
+  padding: '8px 12px',
+  borderRadius: '6px',
   backgroundColor: colors.primary,
   color: '#fff',
   border: 'none',
   cursor: 'pointer',
-  fontSize: '14px',
+  fontSize: '13px',
   fontWeight: 500,
   flexShrink: 0,
-  transition: 'background-color 0.2s, transform 0.1s',
+  transition: 'background-color 0.15s',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
 };
 
 export const sendButtonDisabled: CSSProperties = {
   ...sendButton,
-  opacity: 0.5,
+  opacity: 0.4,
   cursor: 'not-allowed',
 };
 
 export const poweredBy: CSSProperties = {
   textAlign: 'center',
-  padding: '6px',
-  fontSize: '11px',
+  padding: '4px',
+  fontSize: '10px',
   color: colors.textMuted,
+  letterSpacing: '0.02em',
 };

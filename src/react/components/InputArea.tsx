@@ -60,13 +60,7 @@ export function InputArea({ onSend, disabled, placeholder = 'Type a message...' 
         rows={1}
       />
       <button
-        style={{
-          ...(canSend ? styles.sendButton : styles.sendButtonDisabled),
-          padding: '10px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        style={canSend ? styles.sendButton : styles.sendButtonDisabled}
         onClick={handleSend}
         disabled={!canSend}
         type="button"
