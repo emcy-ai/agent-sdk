@@ -39,6 +39,7 @@ function toWorkspaceConfigError(error: unknown): SseError {
 
 export interface EmcyChatContextValue {
   agent: EmcyAgent;
+  conversationId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;
   isThinking: boolean;
@@ -52,6 +53,7 @@ export interface EmcyChatContextValue {
   startOrRetryPopupAuth: () => void;
   cancelPopupAuth: () => void;
   sendMessage: (message: string) => Promise<void>;
+  authenticateMcpServer: (mcpServerUrl: string) => Promise<boolean>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
@@ -78,6 +80,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const shouldUseBuiltInPopupAuth = !config.onAuthRequired;
 
   const builtInOnAuthRequiredRef = useRef<BuiltInOnAuthRequiredFn | null>(null);
@@ -132,6 +135,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     const onMessage = (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
       setStreamingContent('');
+      setConversationId(agent.getConversationId());
     };
 
     const onContentDelta = (delta: SseContentDelta) => {
@@ -139,6 +143,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     };
 
     const onToolCall = (tc: SseToolCall) => {
+      setConversationId(agent.getConversationId());
       setMessages((prev) => [
         ...prev,
         {
@@ -223,6 +228,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     agent.init().then((initConfig) => {
       setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
+      setConversationId(agent.getConversationId());
     }).catch((err) => {
       setError(toWorkspaceConfigError(err));
     });
@@ -248,12 +254,19 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     await agent.signOutMcpServer(mcpServerUrl);
   };
 
+  const authenticateMcpServer = async (mcpServerUrl: string) => {
+    const success = await agent.authenticate(mcpServerUrl);
+    setMcpServers(agent.getMcpServers());
+    return success;
+  };
+
   const cancel = () => {
     agent.cancel();
   };
 
   const newConversation = () => {
     agent.newConversation();
+    setConversationId(null);
     setMessages([]);
     setStreamingContent('');
     setError(null);
@@ -264,6 +277,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     <EmcyChatContext.Provider
       value={{
         agent,
+        conversationId,
         messages,
         isLoading,
         isThinking,
@@ -279,6 +293,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
           : () => {},
         cancelPopupAuth: shouldUseBuiltInPopupAuth ? cancelPopupAuth : () => {},
         sendMessage,
+        authenticateMcpServer,
         signOutMcpServer,
         cancel,
         newConversation,

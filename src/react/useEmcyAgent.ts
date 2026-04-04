@@ -25,6 +25,7 @@ function toWorkspaceConfigError(error: unknown): SseError {
 
 export interface UseEmcyAgentReturn {
   agent: EmcyAgent;
+  conversationId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;
   isThinking: boolean;
@@ -32,6 +33,7 @@ export interface UseEmcyAgentReturn {
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
   sendMessage: (message: string) => Promise<void>;
+  authenticateMcpServer: (mcpServerUrl: string) => Promise<boolean>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
   newConversation: () => void;
@@ -51,6 +53,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
 
   if (!agentRef.current) {
     agentRef.current = new EmcyAgent(config);
@@ -61,6 +64,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     const onMessage = (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
       setStreamingContent('');
+      setConversationId(agent.getConversationId());
     };
 
     const onContentDelta = (delta: SseContentDelta) => {
@@ -68,6 +72,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     };
 
     const onToolCall = (tc: SseToolCall) => {
+      setConversationId(agent.getConversationId());
       setMessages((prev) => [
         ...prev,
         {
@@ -151,6 +156,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agent.init().then((config) => {
       setAgentConfig(config);
       setMcpServers(agent.getMcpServers());
+      setConversationId(agent.getConversationId());
     }).catch((err) => {
       setError(toWorkspaceConfigError(err));
     });
@@ -176,12 +182,19 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     await agent.signOutMcpServer(mcpServerUrl);
   };
 
+  const authenticateMcpServer = async (mcpServerUrl: string) => {
+    const success = await agent.authenticate(mcpServerUrl);
+    setMcpServers(agent.getMcpServers());
+    return success;
+  };
+
   const cancel = () => {
     agent.cancel();
   };
 
   const newConversation = () => {
     agent.newConversation();
+    setConversationId(null);
     setMessages([]);
     setStreamingContent('');
     setError(null);
@@ -190,6 +203,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
 
   return {
     agent,
+    conversationId,
     messages,
     isLoading,
     isThinking,
@@ -197,6 +211,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agentConfig,
     mcpServers,
     sendMessage,
+    authenticateMcpServer,
     signOutMcpServer,
     cancel,
     newConversation,
