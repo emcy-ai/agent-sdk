@@ -20,6 +20,8 @@ export interface EmcyChatProps extends EmcyAgentConfig {
   placeholder?: string;
   /** Whether the widget starts open (floating mode only) */
   defaultOpen?: boolean;
+  /** Called when a tool call completes or the agent finishes a turn that included tool calls. Use this to refresh host app data. */
+  onToolActivity?: () => void;
 }
 
 /**
@@ -44,6 +46,7 @@ export function EmcyChat({
   welcomeMessage,
   placeholder,
   defaultOpen = false,
+  onToolActivity,
   ...agentConfig
 }: EmcyChatProps) {
   return (
@@ -54,6 +57,7 @@ export function EmcyChat({
         welcomeMessage={welcomeMessage}
         placeholder={placeholder}
         defaultOpen={defaultOpen}
+        onToolActivity={onToolActivity}
       />
     </EmcyChatProvider>
   );
@@ -65,6 +69,7 @@ interface EmcyChatInnerProps {
   welcomeMessage?: string;
   placeholder?: string;
   defaultOpen: boolean;
+  onToolActivity?: () => void;
 }
 
 type AnimState = 'closed' | 'opening' | 'open' | 'closing';
@@ -75,9 +80,12 @@ function EmcyChatInner({
   welcomeMessage,
   placeholder,
   defaultOpen,
+  onToolActivity,
 }: EmcyChatInnerProps) {
   const [animState, setAnimState] = useState<AnimState>(defaultOpen ? 'open' : 'closed');
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const wasLoadingRef = useRef(false);
+  const prevToolCountRef = useRef(0);
   const {
     agent,
     messages,
@@ -105,6 +113,26 @@ function EmcyChatInner({
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  // Auto-fire onToolActivity when tool calls complete
+  useEffect(() => {
+    const toolMessages = messages.filter(m => m.role === 'tool_call');
+    if (wasLoadingRef.current && !isLoading && toolMessages.length > 0) {
+      onToolActivity?.();
+    }
+    wasLoadingRef.current = isLoading;
+  }, [isLoading, messages, onToolActivity]);
+
+  useEffect(() => {
+    const toolMessages = messages.filter(m => m.role === 'tool_call');
+    if (toolMessages.length > prevToolCountRef.current) {
+      const latest = toolMessages[toolMessages.length - 1];
+      if (latest.toolCallStatus === 'completed' || latest.toolCallStatus === 'error') {
+        onToolActivity?.();
+      }
+    }
+    prevToolCountRef.current = toolMessages.filter(m => m.role === 'tool_call').length;
+  }, [messages, onToolActivity]);
 
   const handleOpen = () => {
     setAnimState('opening');

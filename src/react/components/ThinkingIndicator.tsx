@@ -8,7 +8,7 @@ export function ThinkingIndicator() {
       style={{
         maxWidth: '80%',
         padding: '12px 16px',
-        borderRadius: '16px 16px 16px 4px',
+        borderRadius: '10px 10px 10px 3px',
         backgroundColor: colors.assistantBubble,
         alignSelf: 'flex-start',
         display: 'flex',

@@ -20,6 +20,7 @@ export function InputArea({ onSend, disabled, placeholder = 'Type a message...' 
     setValue('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
+      textareaRef.current.focus();
     }
   };
 

@@ -8,29 +8,29 @@ interface MarkdownRendererProps {
 const codeBlockStyle: React.CSSProperties = {
   backgroundColor: '#1e1e2e',
   color: '#cdd6f4',
-  padding: '12px 16px',
+  padding: '10px 14px',
   borderRadius: 8,
-  fontSize: 13,
+  fontSize: 12,
   fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", monospace',
   overflowX: 'auto',
-  margin: '8px 0',
-  lineHeight: 1.5,
+  margin: '6px 0',
+  lineHeight: 1.55,
   whiteSpace: 'pre',
 };
 
 const inlineCodeStyle: React.CSSProperties = {
-  backgroundColor: '#f1f5f9',
-  color: '#e11d48',
-  padding: '2px 6px',
+  backgroundColor: colors.bgTertiary,
+  color: colors.text,
+  padding: '1px 5px',
   borderRadius: 4,
   fontSize: '0.9em',
   fontFamily: '"SF Mono", "Fira Code", monospace',
 };
 
 const blockquoteStyle: React.CSSProperties = {
-  borderLeft: `3px solid ${colors.primary}`,
+  borderLeft: `3px solid ${colors.border}`,
   paddingLeft: 12,
-  margin: '8px 0',
+  margin: '6px 0',
   color: colors.textSecondary,
   fontStyle: 'italic',
 };
@@ -43,36 +43,28 @@ const linkStyle: React.CSSProperties = {
 /** Parse inline markdown (bold, italic, code, links) */
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  // Regex for inline elements: code, bold, italic, links
   const regex = /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[([^\]]+)\]\(([^)]+)\))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let i = 0;
 
   while ((match = regex.exec(text)) !== null) {
-    // Add text before match
     if (match.index > lastIndex) {
       nodes.push(text.slice(lastIndex, match.index));
     }
 
     const key = `${keyPrefix}-${i++}`;
     if (match[1]) {
-      // Inline code
       nodes.push(<code key={key} style={inlineCodeStyle}>{match[1].slice(1, -1)}</code>);
     } else if (match[2]) {
-      // Bold **text**
-      nodes.push(<strong key={key}>{match[2].slice(2, -2)}</strong>);
+      nodes.push(<strong key={key} style={{ fontWeight: 600 }}>{match[2].slice(2, -2)}</strong>);
     } else if (match[3]) {
-      // Bold __text__
-      nodes.push(<strong key={key}>{match[3].slice(2, -2)}</strong>);
+      nodes.push(<strong key={key} style={{ fontWeight: 600 }}>{match[3].slice(2, -2)}</strong>);
     } else if (match[4]) {
-      // Italic *text*
       nodes.push(<em key={key}>{match[4].slice(1, -1)}</em>);
     } else if (match[5]) {
-      // Italic _text_
       nodes.push(<em key={key}>{match[5].slice(1, -1)}</em>);
     } else if (match[6]) {
-      // Link [text](url)
       nodes.push(
         <a key={key} href={match[8]} target="_blank" rel="noopener noreferrer" style={linkStyle}>
           {match[7]}
@@ -91,7 +83,6 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
 }
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
-  // Split by code blocks first
   const parts = content.split(/(```[\s\S]*?```)/g);
   const elements: React.ReactNode[] = [];
   let blockKey = 0;
@@ -116,30 +107,23 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
     while (i < lines.length) {
       const line = lines[i];
+      const trimmed = line.trimStart();
 
       // Headings
-      if (line.startsWith('### ')) {
+      const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        const text = headingMatch[2];
+        const style: React.CSSProperties = {
+          fontWeight: level <= 2 ? 600 : 500,
+          fontSize: level === 1 ? '1.15em' : level === 2 ? '1.05em' : '1em',
+          margin: '10px 0 4px',
+          color: colors.text,
+          lineHeight: 1.35,
+        };
         elements.push(
-          <div key={`h3-${blockKey++}`} style={{ fontWeight: 600, fontSize: '1em', margin: '8px 0 4px' }}>
-            {parseInline(line.slice(4), `h3i-${blockKey}`)}
-          </div>,
-        );
-        i++;
-        continue;
-      }
-      if (line.startsWith('## ')) {
-        elements.push(
-          <div key={`h2-${blockKey++}`} style={{ fontWeight: 600, fontSize: '1.1em', margin: '10px 0 4px' }}>
-            {parseInline(line.slice(3), `h2i-${blockKey}`)}
-          </div>,
-        );
-        i++;
-        continue;
-      }
-      if (line.startsWith('# ')) {
-        elements.push(
-          <div key={`h1-${blockKey++}`} style={{ fontWeight: 700, fontSize: '1.25em', margin: '12px 0 4px' }}>
-            {parseInline(line.slice(2), `h1i-${blockKey}`)}
+          <div key={`h-${blockKey++}`} style={style}>
+            {parseInline(text, `hi-${blockKey}`)}
           </div>,
         );
         i++;
@@ -147,10 +131,10 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       }
 
       // Blockquote
-      if (line.startsWith('> ')) {
+      if (trimmed.startsWith('> ')) {
         const quoteLines: string[] = [];
-        while (i < lines.length && lines[i].startsWith('> ')) {
-          quoteLines.push(lines[i].slice(2));
+        while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
+          quoteLines.push(lines[i].trimStart().slice(2));
           i++;
         }
         elements.push(
@@ -164,16 +148,18 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       }
 
       // Unordered list
-      if (/^[-*] /.test(line)) {
+      if (/^[-*]\s+/.test(trimmed)) {
         const items: string[] = [];
-        while (i < lines.length && /^[-*] /.test(lines[i])) {
-          items.push(lines[i].slice(2));
+        while (i < lines.length && /^[-*]\s+/.test(lines[i].trimStart())) {
+          items.push(lines[i].trimStart().replace(/^[-*]\s+/, ''));
           i++;
         }
         elements.push(
-          <ul key={`ul-${blockKey++}`} style={{ margin: '4px 0', paddingLeft: 20 }}>
+          <ul key={`ul-${blockKey++}`} style={{ margin: '4px 0', paddingLeft: 20, listStyleType: 'disc' }}>
             {items.map((item, ii) => (
-              <li key={ii} style={{ marginBottom: 2 }}>{parseInline(item, `uli-${blockKey}-${ii}`)}</li>
+              <li key={ii} style={{ marginBottom: 3, lineHeight: 1.55 }}>
+                {parseInline(item, `uli-${blockKey}-${ii}`)}
+              </li>
             ))}
           </ul>,
         );
@@ -181,16 +167,18 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       }
 
       // Ordered list
-      if (/^\d+\. /.test(line)) {
+      if (/^\d+[.)]\s+/.test(trimmed)) {
         const items: string[] = [];
-        while (i < lines.length && /^\d+\. /.test(lines[i])) {
-          items.push(lines[i].replace(/^\d+\. /, ''));
+        while (i < lines.length && /^\d+[.)]\s+/.test(lines[i].trimStart())) {
+          items.push(lines[i].trimStart().replace(/^\d+[.)]\s+/, ''));
           i++;
         }
         elements.push(
-          <ol key={`ol-${blockKey++}`} style={{ margin: '4px 0', paddingLeft: 20 }}>
+          <ol key={`ol-${blockKey++}`} style={{ margin: '4px 0', paddingLeft: 20, listStyleType: 'decimal' }}>
             {items.map((item, ii) => (
-              <li key={ii} style={{ marginBottom: 2 }}>{parseInline(item, `oli-${blockKey}-${ii}`)}</li>
+              <li key={ii} style={{ marginBottom: 3, lineHeight: 1.55 }}>
+                {parseInline(item, `oli-${blockKey}-${ii}`)}
+              </li>
             ))}
           </ol>,
         );
@@ -198,20 +186,24 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       }
 
       // Empty line = paragraph break
-      if (line.trim() === '') {
+      if (trimmed === '') {
         i++;
         continue;
       }
 
       // Regular paragraph
       elements.push(
-        <div key={`p-${blockKey++}`} style={{ margin: '2px 0' }}>
-          {parseInline(line, `pi-${blockKey}`)}
-        </div>,
+        <p key={`p-${blockKey++}`} style={{ margin: '4px 0', lineHeight: 1.6 }}>
+          {parseInline(trimmed, `pi-${blockKey}`)}
+        </p>,
       );
       i++;
     }
   }
 
-  return <>{elements}</>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {elements}
+    </div>
+  );
 }

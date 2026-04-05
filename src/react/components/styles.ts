@@ -55,7 +55,7 @@ export const chatWindow: CSSProperties = {
   height: '600px',
   maxHeight: 'calc(100vh - 120px)',
   minHeight: 0,
-  borderRadius: '16px',
+  borderRadius: '12px',
   backgroundColor: colors.bg,
   border: `1px solid ${colors.border}`,
   boxShadow: '0 24px 80px rgba(15,23,42,0.14), 0 6px 24px rgba(15,23,42,0.08)',
@@ -117,7 +117,7 @@ export const iconButton: CSSProperties = {
   border: `1px solid ${colors.border}`,
   cursor: 'pointer',
   padding: '6px',
-  borderRadius: '10px',
+  borderRadius: '8px',
   color: colors.textSecondary,
   display: 'flex',
   alignItems: 'center',
@@ -130,10 +130,10 @@ export const messageList: CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   overscrollBehavior: 'contain',
-  padding: '10px 12px 12px',
+  padding: '12px 14px 14px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '6px',
+  gap: '4px',
 };
 
 export const welcomeContainer: CSSProperties = {
@@ -157,7 +157,7 @@ export const blockingStateCard: CSSProperties = {
   width: '100%',
   maxWidth: '420px',
   padding: '20px',
-  borderRadius: '16px',
+  borderRadius: '10px',
   backgroundColor: colors.errorBg,
   border: `1px solid ${colors.errorBorder}`,
   boxShadow: '0 8px 24px rgba(153, 27, 27, 0.08)',
@@ -200,29 +200,29 @@ export const blockingStateHint: CSSProperties = {
 };
 
 export const userBubble: CSSProperties = {
-  maxWidth: '80%',
+  maxWidth: '82%',
   flexShrink: 0,
-  padding: '9px 12px',
-  borderRadius: '16px 16px 4px 16px',
+  padding: '8px 12px',
+  borderRadius: '10px 10px 3px 10px',
   backgroundColor: colors.userBubble,
   color: colors.userText,
   alignSelf: 'flex-end',
   fontSize: '13px',
-  lineHeight: 1.5,
+  lineHeight: 1.55,
   wordBreak: 'break-word',
 };
 
 export const assistantBubble: CSSProperties = {
-  maxWidth: '85%',
+  maxWidth: '88%',
   flexShrink: 0,
-  padding: '9px 12px',
-  borderRadius: '16px 16px 16px 4px',
-  backgroundColor: colors.assistantBubble,
+  padding: '6px 0',
+  borderRadius: 0,
+  backgroundColor: 'transparent',
   color: colors.assistantText,
-  border: `1px solid ${colors.border}`,
+  border: 'none',
   alignSelf: 'flex-start',
   fontSize: '13px',
-  lineHeight: 1.5,
+  lineHeight: 1.6,
   wordBreak: 'break-word',
 };
 
@@ -233,7 +233,7 @@ export const streamingBubble: CSSProperties = {
 export const toolCallCard: CSSProperties = {
   maxWidth: '100%',
   padding: '8px 10px',
-  borderRadius: '14px',
+  borderRadius: '8px',
   backgroundColor: colors.toolBg,
   border: `1px solid ${colors.toolBorder}`,
   color: colors.toolText,
@@ -254,7 +254,7 @@ export const toolResultCard: CSSProperties = {
 export const errorCard: CSSProperties = {
   padding: '10px 14px',
   margin: '0 12px',
-  borderRadius: '12px',
+  borderRadius: '8px',
   backgroundColor: colors.errorBg,
   border: `1px solid ${colors.errorBorder}`,
   color: colors.errorText,
@@ -263,10 +263,10 @@ export const errorCard: CSSProperties = {
 };
 
 export const inputArea: CSSProperties = {
-  padding: '10px 12px 12px',
+  padding: '10px 14px 14px',
   borderTop: `1px solid ${colors.border}`,
   display: 'flex',
-  gap: '10px',
+  gap: '8px',
   alignItems: 'flex-end',
   backgroundColor: colors.bg,
   flexShrink: 0,
@@ -274,10 +274,10 @@ export const inputArea: CSSProperties = {
 
 export const textInput: CSSProperties = {
   flex: 1,
-  padding: '9px 12px',
-  borderRadius: '12px',
+  padding: '8px 12px',
+  borderRadius: '8px',
   border: `1px solid ${colors.border}`,
-  backgroundColor: colors.bgSecondary,
+  backgroundColor: colors.bg,
   fontSize: '13px',
   color: colors.text,
   outline: 'none',
@@ -285,13 +285,14 @@ export const textInput: CSSProperties = {
   fontFamily: 'inherit',
   lineHeight: 1.5,
   maxHeight: '120px',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
 };
 
 export const sendButton: CSSProperties = {
-  width: '36px',
-  height: '36px',
+  width: '34px',
+  height: '34px',
   padding: 0,
-  borderRadius: '10px',
+  borderRadius: '8px',
   backgroundColor: colors.primary,
   color: '#fff',
   border: 'none',
@@ -299,16 +300,15 @@ export const sendButton: CSSProperties = {
   fontSize: '13px',
   fontWeight: 500,
   flexShrink: 0,
-  transition: 'background-color 0.15s, transform 0.15s, box-shadow 0.15s',
+  transition: 'background-color 0.15s, transform 0.15s',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 8px 18px rgba(24,24,27,0.18)',
 };
 
 export const sendButtonDisabled: CSSProperties = {
   ...sendButton,
-  opacity: 0.4,
+  opacity: 0.35,
   cursor: 'not-allowed',
 };
 
