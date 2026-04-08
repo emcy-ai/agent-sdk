@@ -25,6 +25,7 @@ function App() {
         agentId="ws_xxxxx"
         mode="inline"
         title="AI Assistant"
+        authStorageScope={currentUser.id}
         embeddedAuth={{
           hostIdentity: {
             subject: currentUser.id,
@@ -48,6 +49,7 @@ import { EmcyAgent } from "@emcy/agent-sdk";
 const agent = new EmcyAgent({
   apiKey: "emcy_sk_xxxx",
   agentId: "ws_xxxxx",
+  authStorageScope: currentUser.id,
   embeddedAuth: {
     hostIdentity: {
       subject: currentUser.id,
@@ -69,6 +71,7 @@ await agent.init();
 | `agentServiceUrl` | `string` | Emcy API URL. Defaults to `https://api.emcy.ai`. |
 | `oauthCallbackUrl` | `string` | Override Emcy's popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when running locally. |
 | `oauthClientMetadataUrl` | `string` | Override Emcy's popup client metadata URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when running locally. |
+| `authStorageScope` | `string` | Optional namespace for persisted MCP auth state. Use a stable host-app user id when multiple users may share the same browser profile. Defaults to `embeddedAuth.hostIdentity.subject`, then `embeddedAuth.hostIdentity.email`, then `externalUserId`. |
 | `embeddedAuth` | `EmcyEmbeddedAuthConfig` | Host-account hints for embedded popup auth. This is how the host app tells Emcy who the current user is without passing tokens. |
 | `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Advanced override for the built-in popup auth flow. |
 | `useCookies` | `boolean` | Send cookies with MCP requests. Defaults to `false`. |
@@ -113,6 +116,20 @@ type EmcyEmbeddedAuthConfig = {
 ```
 
 Use `subject` when you have a stable app-specific user id. If not, `email` is the next best hint. If both the host app and downstream provider expose organization ids, include `organizationId` so Emcy can reject cross-org mismatches.
+
+The SDK also uses this identity to scope persisted MCP OAuth state in browser storage. That prevents a newly signed-in app user from inheriting a previous user's cached MCP connection.
+
+## Logout Cleanup
+
+When your app signs the host user out, clear persisted MCP auth state too:
+
+```ts
+import { clearPersistedMcpAuthState } from "@emcy/agent-sdk";
+
+clearPersistedMcpAuthState({ clearAll: true });
+```
+
+Use `clearAll: true` for app logout. Use `authStorageScope` when you need to clear only one signed-in user's cached MCP auth without touching other scopes.
 
 ## Standalone Popup Auth
 

@@ -5,6 +5,7 @@ import {
   buildRegistrationCacheKey,
   saveStoredRegistration,
 } from '../auth/registration';
+import { clearPersistedMcpAuthState } from '../auth-storage';
 import type { AgentConfigResponse, McpServerAuthConfig, OAuthTokenResponse } from '../types';
 
 const MCP_SERVER_URL = 'https://todo.example.com';
@@ -405,6 +406,163 @@ describe('EmcyAgent auth behavior', () => {
     expect(token).toBe('cached-dcr-token');
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientMode).toBe('dcr');
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientId).toBe('dcr-client-123');
+  });
+
+  it('scopes persisted OAuth tokens by authStorageScope', async () => {
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      tokenUrl: 'https://auth.todo.example.com/oauth/token',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      discovered: true,
+    };
+
+    const firstAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'user-a',
+    });
+    (firstAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (firstAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'scoped-access-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    const sameScopeAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'user-a',
+    });
+    (sameScopeAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const otherScopeAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'user-b',
+    });
+    (otherScopeAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const sameScopeToken = await (sameScopeAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+    const otherScopeToken = await (otherScopeAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(sameScopeToken).toBe('scoped-access-token');
+    expect(otherScopeToken).toBeUndefined();
+  });
+
+  it('clears persisted MCP auth state across all scopes during logout', async () => {
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      tokenUrl: 'https://auth.todo.example.com/oauth/token',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      discovered: true,
+    };
+
+    const userAAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'user-a',
+    });
+    (userAAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (userAAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'user-a-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    const userBAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'user-b',
+    });
+    (userBAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (userBAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'user-b-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    localStorage.setItem('emcy-oauth-callback:logout-state', JSON.stringify({ token: 'pending' }));
+
+    clearPersistedMcpAuthState({ clearAll: true });
+
+    const userAToken = await (userAAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+    const userBToken = await (userBAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(userAToken).toBeUndefined();
+    expect(userBToken).toBeUndefined();
+    expect(localStorage.getItem('emcy-oauth-callback:logout-state')).toBeNull();
+  });
+
+  it('treats OAuth servers as needing auth when no scoped token is present', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+        return Response.json({
+          workspaceId: 'workspace_test',
+          name: 'Auth Workspace',
+          mcpServers: [
+            {
+              id: 'server_todo',
+              name: 'Todo MCP',
+              url: MCP_SERVER_URL,
+              authStatus: 'connected',
+              authConfig: {
+                authType: 'oauth2',
+                tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+                tokenUrl: 'https://auth.todo.example.com/oauth/token',
+                callbackUrl: 'https://emcy.ai/oauth/callback',
+                resource: MCP_SERVER_URL,
+                discovered: true,
+              },
+            },
+          ],
+          widgetConfig: null,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authStorageScope: 'fresh-user',
+    });
+
+    await agent.init();
+
+    expect(agent.getMcpServers()).toEqual([{
+      url: MCP_SERVER_URL,
+      name: 'Todo MCP',
+      authStatus: 'needs_auth',
+      canSignOut: true,
+    }]);
   });
 
   it('emits connected auth status after popup auth initializes the MCP session', async () => {
