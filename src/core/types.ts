@@ -73,18 +73,6 @@ export interface EmcyAgentConfig {
   embeddedAuth?: EmcyEmbeddedAuthConfig;
 
   /**
-   * Optional namespace for persisted MCP auth state in browser storage.
-   * Set this to a stable host-app user identifier when multiple signed-in
-   * users may share the same browser profile.
-   *
-   * If omitted, the SDK falls back to:
-   * 1. embeddedAuth.hostIdentity.subject
-   * 2. embeddedAuth.hostIdentity.email
-   * 3. externalUserId
-   */
-  authStorageScope?: string;
-
-  /**
    * Called when an MCP server requires authentication and the built-in
    * popup flow is not being used. The SDK will invoke this so the
    * integrator can trigger a custom login flow.

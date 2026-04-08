@@ -24,10 +24,6 @@ import {
   loadStoredRegistration,
   resolveOAuthRegistration,
 } from './auth/registration';
-import {
-  buildScopedOAuthTokenStorageKey,
-  resolveAuthStorageScope,
-} from './auth-storage';
 
 type EventHandler<T> = (data: T) => void;
 type BuiltInPopupAuthHandler = {
@@ -157,6 +153,9 @@ export class EmcyAgent {
   /** Servers explicitly disconnected by the user and awaiting manual re-auth */
   private manuallySignedOutServers: Set<string> = new Set();
 
+  /** localStorage key prefix for persisted OAuth tokens */
+  private static readonly STORAGE_PREFIX = 'emcy_oauth_';
+
   constructor(config: EmcyAgentConfig) {
     this.config = {
       ...config,
@@ -207,9 +206,11 @@ export class EmcyAgent {
         if (!this.mcpSessions.has(server.url)) {
           let authStatus: 'connected' | 'needs_auth';
 
-          if (server.authConfig?.authType === 'oauth2') {
-            authStatus = this.hasValidOAuthToken(server.url) ? 'connected' : 'needs_auth';
+          if (this.hasValidOAuthToken(server.url)) {
+            // OAuth mode with valid stored token
+            authStatus = 'connected';
           } else {
+            // OAuth mode without token - use server's auth status
             authStatus = server.authStatus || 'connected';
           }
 
@@ -790,22 +791,15 @@ export class EmcyAgent {
     return btoa(url).replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
   }
 
-  private getAuthStorageScope(): string | null {
-    return resolveAuthStorageScope(this.config);
-  }
-
   private getLegacyTokenStorageKey(mcpServerUrl: string): string {
-    return buildScopedOAuthTokenStorageKey(this.hashUrl(mcpServerUrl), this.getAuthStorageScope());
+    return `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
   }
 
   private getTokenStorageKey(
     mcpServerUrl: string,
     authConfig: McpServerAuthConfig | null | undefined,
   ): string {
-    return buildScopedOAuthTokenStorageKey(
-      buildTokenCacheKey(authConfig, mcpServerUrl),
-      this.getAuthStorageScope(),
-    );
+    return `${EmcyAgent.STORAGE_PREFIX}${buildTokenCacheKey(authConfig, mcpServerUrl)}`;
   }
 
   private getTokenStorageCandidates(

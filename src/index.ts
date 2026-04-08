@@ -1,6 +1,4 @@
 export { EmcyAgent } from './core/EmcyAgent';
-export { clearPersistedMcpAuthState } from './core/auth-storage';
-export type { ClearPersistedMcpAuthStateOptions } from './core/auth-storage';
 export type {
   ClientToolDefinition,
   ClientToolParameter,
