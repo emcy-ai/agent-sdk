@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { EmcyAgent } from '../core/EmcyAgent';
+import {
+  clearPersistedMcpAuthState,
+  resolveExplicitAuthSessionKey,
+} from '../core/auth-storage';
 import type {
   EmcyAgentConfig,
   ChatMessage,
@@ -45,7 +49,8 @@ export interface UseEmcyAgentReturn {
  * Use this when you want full control over the UI.
  */
 export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
-  const agentRef = useRef<EmcyAgent | null>(null);
+  const latestConfigRef = useRef(config);
+  latestConfigRef.current = config;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -54,13 +59,40 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const authSessionKey = resolveExplicitAuthSessionKey(config);
+  const authSessionKeyRef = useRef(authSessionKey);
 
-  if (!agentRef.current) {
-    agentRef.current = new EmcyAgent(config);
-  }
-  const agent = agentRef.current;
+  const [agent, setAgent] = useState<EmcyAgent>(() => new EmcyAgent(latestConfigRef.current));
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
 
   useEffect(() => {
+    const previousAuthSessionKey = authSessionKeyRef.current;
+    if (previousAuthSessionKey === authSessionKey) {
+      return;
+    }
+
+    authSessionKeyRef.current = authSessionKey;
+    agentRef.current.cancel();
+
+    if (previousAuthSessionKey) {
+      clearPersistedMcpAuthState({ authSessionKey: previousAuthSessionKey });
+    }
+
+    setConversationId(null);
+    setMessages([]);
+    setStreamingContent('');
+    setError(null);
+    setIsThinking(false);
+    setIsLoading(false);
+    setAgentConfig(null);
+    setMcpServers([]);
+    setAgent(new EmcyAgent(latestConfigRef.current));
+  }, [authSessionKey]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
     const onMessage = (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
       setStreamingContent('');
@@ -154,14 +186,23 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agent.on('mcp_auth_status', onMcpAuthStatus);
 
     agent.init().then((config) => {
+      if (!isCurrent) {
+        return;
+      }
+
       setAgentConfig(config);
       setMcpServers(agent.getMcpServers());
       setConversationId(agent.getConversationId());
     }).catch((err) => {
+      if (!isCurrent) {
+        return;
+      }
+
       setError(toWorkspaceConfigError(err));
     });
 
     return () => {
+      isCurrent = false;
       agent.off('message', onMessage);
       agent.off('content_delta', onContentDelta);
       agent.off('tool_call', onToolCall);
@@ -171,6 +212,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
       agent.off('loading', onLoading);
       agent.off('error', onError);
       agent.off('mcp_auth_status', onMcpAuthStatus);
+      agent.cancel();
     };
   }, [agent]);
 
