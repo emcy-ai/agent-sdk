@@ -32,6 +32,7 @@ function App() {
             email: currentUser.email,
             organizationId: currentUser.organizationId,
             displayName: currentUser.name,
+            avatarUrl: currentUser.avatarUrl,
           },
           mismatchPolicy: "block_with_switch",
         }}
@@ -78,6 +79,8 @@ await agent.init();
 | `externalUserId` | `string` | Optional user identifier for conversations. |
 | `context` | `Record<string, unknown>` | Extra context sent with each message. |
 
+When present, `externalUserId` and `embeddedAuth.hostIdentity` are combined into a typed `externalUser` payload on chat requests so Emcy workspaces can attribute usage and budgets per embedded end user.
+
 ## Embedded Auth
 
 Embedded MCP auth is popup-only.
@@ -107,6 +110,7 @@ type EmcyEmbeddedAuthIdentity = {
   email?: string;
   organizationId?: string;
   displayName?: string;
+  avatarUrl?: string;
 };
 
 type EmcyEmbeddedAuthConfig = {

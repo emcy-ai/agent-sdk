@@ -304,6 +304,24 @@ export class EmcyAgent {
     }));
   }
 
+  private buildExternalUserContext(): Record<string, unknown> | undefined {
+    const hostIdentity = this.config.embeddedAuth?.hostIdentity;
+    const id =
+      this.config.externalUserId ??
+      hostIdentity?.subject ??
+      hostIdentity?.email;
+
+    const externalUser: Record<string, unknown> = {};
+
+    if (id) externalUser.id = id;
+    if (hostIdentity?.email) externalUser.email = hostIdentity.email;
+    if (hostIdentity?.displayName) externalUser.displayName = hostIdentity.displayName;
+    if (hostIdentity?.avatarUrl) externalUser.avatarUrl = hostIdentity.avatarUrl;
+    if (hostIdentity?.organizationId) externalUser.organizationId = hostIdentity.organizationId;
+
+    return Object.keys(externalUser).length > 0 ? externalUser : undefined;
+  }
+
   /** Whether a request is currently in flight */
   getIsLoading(): boolean {
     return this.isLoading;
@@ -1096,6 +1114,10 @@ export class EmcyAgent {
       externalUserId: this.config.externalUserId,
       context: this.config.context,
     };
+    const externalUser = this.buildExternalUserContext();
+    if (externalUser) {
+      chatBody.externalUser = externalUser;
+    }
     const clientToolsSchemas = this.clientToolsToSchemas();
     if (clientToolsSchemas.length > 0) {
       chatBody.clientTools = clientToolsSchemas;

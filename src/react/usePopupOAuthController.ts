@@ -98,7 +98,7 @@ function formatHostIdentityLabel(identity?: EmcyEmbeddedAuthIdentity): string | 
   );
 }
 
-function isHostedMcpAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
+function isGatewayAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
   const loginUrl = authConfig.authorizationEndpoint ?? authConfig.loginUrl;
   if (!loginUrl) {
     return false;
@@ -106,7 +106,7 @@ function isHostedMcpAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
 
   try {
     const url = new URL(loginUrl);
-    return /\/api\/v1\/hosted-mcp\/[^/]+\/authorize$/i.test(url.pathname);
+    return /\/api\/v1\/gateway\/[^/]+\/authorize$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -486,7 +486,7 @@ export function usePopupOAuthController(
       if (effectiveAuthConfig.resource) {
         params.set('resource', effectiveAuthConfig.resource);
       }
-      if (request.hostIdentity && isHostedMcpAuthorizeUrl(effectiveAuthConfig)) {
+      if (request.hostIdentity && isGatewayAuthorizeUrl(effectiveAuthConfig)) {
         const subject = normalizeOptionalValue(request.hostIdentity.subject);
         const email = normalizeOptionalValue(request.hostIdentity.email);
         const organizationId = normalizeOptionalValue(request.hostIdentity.organizationId);

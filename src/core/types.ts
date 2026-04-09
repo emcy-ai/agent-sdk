@@ -27,11 +27,20 @@ export interface EmcyEmbeddedAuthIdentity {
   email?: string;
   organizationId?: string;
   displayName?: string;
+  avatarUrl?: string;
 }
 
 export interface EmcyEmbeddedAuthConfig {
   hostIdentity?: EmcyEmbeddedAuthIdentity;
   mismatchPolicy: 'block_with_switch';
+}
+
+export interface EmcyExternalUserContext {
+  id?: string;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  organizationId?: string;
 }
 
 export interface EmcyAgentConfig {
