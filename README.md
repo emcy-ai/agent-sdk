@@ -23,6 +23,7 @@ function App() {
       <EmcyChat
         apiKey="emcy_sk_xxxx"
         agentId="ws_xxxxx"
+        authSessionKey={currentSession.id}
         mode="inline"
         title="AI Assistant"
         embeddedAuth={{
@@ -31,6 +32,7 @@ function App() {
             email: currentUser.email,
             organizationId: currentUser.organizationId,
             displayName: currentUser.name,
+            avatarUrl: currentUser.avatarUrl,
           },
           mismatchPolicy: "block_with_switch",
         }}
@@ -48,6 +50,7 @@ import { EmcyAgent } from "@emcy/agent-sdk";
 const agent = new EmcyAgent({
   apiKey: "emcy_sk_xxxx",
   agentId: "ws_xxxxx",
+  authSessionKey: currentSession.id,
   embeddedAuth: {
     hostIdentity: {
       subject: currentUser.id,
@@ -69,11 +72,14 @@ await agent.init();
 | `agentServiceUrl` | `string` | Emcy API URL. Defaults to `https://api.emcy.ai`. |
 | `oauthCallbackUrl` | `string` | Override Emcy's popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when running locally. |
 | `oauthClientMetadataUrl` | `string` | Override Emcy's popup client metadata URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when running locally. |
+| `authSessionKey` | `string \| null` | Host app auth-session boundary for persisted MCP auth. Pass your current session id so logout forces reconnect, even for the same user. |
 | `embeddedAuth` | `EmcyEmbeddedAuthConfig` | Host-account hints for embedded popup auth. This is how the host app tells Emcy who the current user is without passing tokens. |
 | `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Advanced override for the built-in popup auth flow. |
 | `useCookies` | `boolean` | Send cookies with MCP requests. Defaults to `false`. |
 | `externalUserId` | `string` | Optional user identifier for conversations. |
 | `context` | `Record<string, unknown>` | Extra context sent with each message. |
+
+When present, `externalUserId` and `embeddedAuth.hostIdentity` are combined into a typed `externalUser` payload on chat requests so Emcy workspaces can attribute usage and budgets per embedded end user.
 
 ## Embedded Auth
 
@@ -104,6 +110,7 @@ type EmcyEmbeddedAuthIdentity = {
   email?: string;
   organizationId?: string;
   displayName?: string;
+  avatarUrl?: string;
 };
 
 type EmcyEmbeddedAuthConfig = {
@@ -113,6 +120,18 @@ type EmcyEmbeddedAuthConfig = {
 ```
 
 Use `subject` when you have a stable app-specific user id. If not, `email` is the next best hint. If both the host app and downstream provider expose organization ids, include `organizationId` so Emcy can reject cross-org mismatches.
+
+## Logout Cleanup
+
+When your app signs the host user out, clear persisted MCP auth state too:
+
+```ts
+import { clearPersistedMcpAuth } from "@emcy/agent-sdk";
+
+clearPersistedMcpAuth();
+```
+
+Use `authSessionKey` on every mounted SDK surface and call `clearPersistedMcpAuth()` during app logout so a later session cannot inherit cached MCP connections from the previous user.
 
 ## Standalone Popup Auth
 

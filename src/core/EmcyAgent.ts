@@ -24,6 +24,10 @@ import {
   loadStoredRegistration,
   resolveOAuthRegistration,
 } from './auth/registration';
+import {
+  buildScopedOAuthTokenStorageKey,
+  resolveExplicitAuthSessionKey,
+} from './auth-storage';
 
 type EventHandler<T> = (data: T) => void;
 type BuiltInPopupAuthHandler = {
@@ -153,9 +157,6 @@ export class EmcyAgent {
   /** Servers explicitly disconnected by the user and awaiting manual re-auth */
   private manuallySignedOutServers: Set<string> = new Set();
 
-  /** localStorage key prefix for persisted OAuth tokens */
-  private static readonly STORAGE_PREFIX = 'emcy_oauth_';
-
   constructor(config: EmcyAgentConfig) {
     this.config = {
       ...config,
@@ -206,11 +207,9 @@ export class EmcyAgent {
         if (!this.mcpSessions.has(server.url)) {
           let authStatus: 'connected' | 'needs_auth';
 
-          if (this.hasValidOAuthToken(server.url)) {
-            // OAuth mode with valid stored token
-            authStatus = 'connected';
+          if (server.authConfig?.authType === 'oauth2') {
+            authStatus = this.hasValidOAuthToken(server.url) ? 'connected' : 'needs_auth';
           } else {
-            // OAuth mode without token - use server's auth status
             authStatus = server.authStatus || 'connected';
           }
 
@@ -303,6 +302,24 @@ export class EmcyAgent {
       description: def.description,
       inputSchema: parametersToJsonSchema(def.parameters) as object,
     }));
+  }
+
+  private buildExternalUserContext(): Record<string, unknown> | undefined {
+    const hostIdentity = this.config.embeddedAuth?.hostIdentity;
+    const id =
+      this.config.externalUserId ??
+      hostIdentity?.subject ??
+      hostIdentity?.email;
+
+    const externalUser: Record<string, unknown> = {};
+
+    if (id) externalUser.id = id;
+    if (hostIdentity?.email) externalUser.email = hostIdentity.email;
+    if (hostIdentity?.displayName) externalUser.displayName = hostIdentity.displayName;
+    if (hostIdentity?.avatarUrl) externalUser.avatarUrl = hostIdentity.avatarUrl;
+    if (hostIdentity?.organizationId) externalUser.organizationId = hostIdentity.organizationId;
+
+    return Object.keys(externalUser).length > 0 ? externalUser : undefined;
   }
 
   /** Whether a request is currently in flight */
@@ -792,25 +809,38 @@ export class EmcyAgent {
   }
 
   private getLegacyTokenStorageKey(mcpServerUrl: string): string {
-    return `${EmcyAgent.STORAGE_PREFIX}${this.hashUrl(mcpServerUrl)}`;
+    return buildScopedOAuthTokenStorageKey(this.hashUrl(mcpServerUrl));
+  }
+
+  private getAuthSessionKey(): string | null {
+    return resolveExplicitAuthSessionKey(this.config);
   }
 
   private getTokenStorageKey(
     mcpServerUrl: string,
     authConfig: McpServerAuthConfig | null | undefined,
   ): string {
-    return `${EmcyAgent.STORAGE_PREFIX}${buildTokenCacheKey(authConfig, mcpServerUrl)}`;
+    return buildScopedOAuthTokenStorageKey(
+      buildTokenCacheKey(authConfig, mcpServerUrl),
+      this.getAuthSessionKey(),
+    );
   }
 
   private getTokenStorageCandidates(
     mcpServerUrl: string,
   ): Array<{ storageKey: string; authConfig: McpServerAuthConfig | null }> {
     const currentAuthConfig = this.getServerAuthConfig(mcpServerUrl);
+    const hasExplicitAuthSessionKey = this.getAuthSessionKey() !== null;
     if (!currentAuthConfig) {
-      return [{
-        storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
-        authConfig: null,
-      }];
+      return hasExplicitAuthSessionKey
+        ? [{
+            storageKey: this.getTokenStorageKey(mcpServerUrl, null),
+            authConfig: null,
+          }]
+        : [{
+            storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
+            authConfig: null,
+          }];
     }
 
     const callbackUrl = getEffectiveCallbackUrl(currentAuthConfig, this.getOAuthCallbackUrl());
@@ -871,10 +901,12 @@ export class EmcyAgent {
       return true;
     });
 
-    resolved.push({
-      storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
-      authConfig: currentAuthConfig,
-    });
+    if (!hasExplicitAuthSessionKey) {
+      resolved.push({
+        storageKey: this.getLegacyTokenStorageKey(mcpServerUrl),
+        authConfig: currentAuthConfig,
+      });
+    }
 
     return resolved;
   }
@@ -1082,6 +1114,10 @@ export class EmcyAgent {
       externalUserId: this.config.externalUserId,
       context: this.config.context,
     };
+    const externalUser = this.buildExternalUserContext();
+    if (externalUser) {
+      chatBody.externalUser = externalUser;
+    }
     const clientToolsSchemas = this.clientToolsToSchemas();
     if (clientToolsSchemas.length > 0) {
       chatBody.clientTools = clientToolsSchemas;

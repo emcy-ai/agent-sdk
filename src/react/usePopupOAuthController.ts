@@ -11,6 +11,7 @@ import {
   clearStoredRegistration,
   resolveOAuthRegistration,
 } from '../core/auth/registration';
+import { normalizeAuthSessionKey } from '../core/auth-storage';
 import type { OAuthPopupPhase, OAuthPopupViewState } from './components/OAuthPopup';
 
 const OAUTH_CALLBACK_CHANNEL_NAME = 'emcy-oauth';
@@ -21,6 +22,7 @@ interface UsePopupOAuthControllerOptions {
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
   embeddedAuth?: EmcyEmbeddedAuthConfig;
+  authSessionKey?: string | null;
 }
 
 interface ActivePopupAuthRequest {
@@ -96,7 +98,7 @@ function formatHostIdentityLabel(identity?: EmcyEmbeddedAuthIdentity): string | 
   );
 }
 
-function isHostedMcpAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
+function isGatewayAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
   const loginUrl = authConfig.authorizationEndpoint ?? authConfig.loginUrl;
   if (!loginUrl) {
     return false;
@@ -104,7 +106,7 @@ function isHostedMcpAuthorizeUrl(authConfig: McpServerAuthConfig): boolean {
 
   try {
     const url = new URL(loginUrl);
-    return /\/api\/v1\/hosted-mcp\/[^/]+\/authorize$/i.test(url.pathname);
+    return /\/api\/v1\/gateway\/[^/]+\/authorize$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -131,6 +133,7 @@ export function usePopupOAuthController(
   const activeRequestRef = useRef<ActivePopupAuthRequest | null>(null);
   const mountedRef = useRef(true);
   const optionsRef = useRef(options);
+  const authSessionKeyRef = useRef(normalizeAuthSessionKey(options.authSessionKey));
 
   useEffect(() => {
     optionsRef.current = options;
@@ -186,6 +189,39 @@ export function usePopupOAuthController(
       request.popupWindow = null;
     }
   }, []);
+
+  useEffect(() => {
+    const previousAuthSessionKey = authSessionKeyRef.current;
+    const nextAuthSessionKey = normalizeAuthSessionKey(options.authSessionKey);
+
+    authSessionKeyRef.current = nextAuthSessionKey;
+    if (previousAuthSessionKey === nextAuthSessionKey) {
+      return;
+    }
+
+    const request = activeRequestRef.current;
+    if (!request) {
+      if (mountedRef.current) {
+        setPopupState(null);
+      }
+      return;
+    }
+
+    clearPollTimer(request);
+    closePopupWindow(request);
+    clearStoredCallbackPayload(request.state);
+    activeRequestRef.current = null;
+    request.resolve(undefined);
+
+    if (mountedRef.current) {
+      setPopupState(null);
+    }
+  }, [
+    clearPollTimer,
+    clearStoredCallbackPayload,
+    closePopupWindow,
+    options.authSessionKey,
+  ]);
 
   const resolveAndClearActiveRequest = useCallback((tokenResponse?: OAuthTokenResponse) => {
     const request = activeRequestRef.current;
@@ -450,7 +486,7 @@ export function usePopupOAuthController(
       if (effectiveAuthConfig.resource) {
         params.set('resource', effectiveAuthConfig.resource);
       }
-      if (request.hostIdentity && isHostedMcpAuthorizeUrl(effectiveAuthConfig)) {
+      if (request.hostIdentity && isGatewayAuthorizeUrl(effectiveAuthConfig)) {
         const subject = normalizeOptionalValue(request.hostIdentity.subject);
         const email = normalizeOptionalValue(request.hostIdentity.email);
         const organizationId = normalizeOptionalValue(request.hostIdentity.organizationId);

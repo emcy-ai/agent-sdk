@@ -1,5 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { EmcyAgent } from '../core/EmcyAgent';
+import {
+  clearPersistedMcpAuthState,
+  resolveExplicitAuthSessionKey,
+} from '../core/auth-storage';
 import type {
   EmcyAgentConfig,
   ChatMessage,
@@ -71,7 +75,8 @@ export interface EmcyChatProviderProps extends EmcyAgentConfig {
  * Handles initialization and event subscriptions.
  */
 export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps) {
-  const agentRef = useRef<EmcyAgent | null>(null);
+  const latestConfigRef = useRef(config);
+  latestConfigRef.current = config;
   const popupAuthRequestRef = useRef<OnAuthRequiredFn>(async () => undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,6 +87,8 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const shouldUseBuiltInPopupAuth = !config.onAuthRequired;
+  const authSessionKey = resolveExplicitAuthSessionKey(config);
+  const authSessionKeyRef = useRef(authSessionKey);
 
   const builtInOnAuthRequiredRef = useRef<BuiltInOnAuthRequiredFn | null>(null);
   if (!builtInOnAuthRequiredRef.current) {
@@ -93,16 +100,33 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     );
   }
 
-  // Create agent once
-  if (!agentRef.current) {
-    const onAuthRequired = config.onAuthRequired ?? builtInOnAuthRequiredRef.current;
+  const createAgent = useCallback(() => {
+    const currentConfig = latestConfigRef.current;
+    const onAuthRequired =
+      currentConfig.onAuthRequired
+      ?? builtInOnAuthRequiredRef.current
+      ?? undefined;
 
-    agentRef.current = new EmcyAgent({
-      ...config,
+    return new EmcyAgent({
+      ...currentConfig,
       onAuthRequired,
     });
-  }
-  const agent = agentRef.current;
+  }, []);
+
+  const [agent, setAgent] = useState<EmcyAgent>(() => createAgent());
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
+
+  const resetAgentState = useCallback(() => {
+    setMessages([]);
+    setIsLoading(false);
+    setIsThinking(false);
+    setError(null);
+    setAgentConfig(null);
+    setStreamingContent('');
+    setMcpServers([]);
+    setConversationId(null);
+  }, []);
 
   const resolveServerName = useCallback((serverUrl: string) => {
     const server = agent.getAgentConfig()?.mcpServers?.find((candidate) => candidate.url === serverUrl);
@@ -120,6 +144,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     oauthCallbackUrl: agent.getOAuthCallbackUrl(),
     oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
     embeddedAuth: config.embeddedAuth,
+    authSessionKey,
   });
 
   popupAuthRequestRef.current = requestAuth;
@@ -131,6 +156,25 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     : null;
 
   useEffect(() => {
+    const previousAuthSessionKey = authSessionKeyRef.current;
+    if (previousAuthSessionKey === authSessionKey) {
+      return;
+    }
+
+    authSessionKeyRef.current = authSessionKey;
+    agentRef.current.cancel();
+
+    if (previousAuthSessionKey) {
+      clearPersistedMcpAuthState({ authSessionKey: previousAuthSessionKey });
+    }
+
+    resetAgentState();
+    setAgent(createAgent());
+  }, [authSessionKey, createAgent, resetAgentState]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
     // Subscribe to events
     const onMessage = (msg: ChatMessage) => {
       setMessages((prev) => [...prev, msg]);
@@ -226,14 +270,23 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
 
     // Initialize agent
     agent.init().then((initConfig) => {
+      if (!isCurrent) {
+        return;
+      }
+
       setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
       setConversationId(agent.getConversationId());
     }).catch((err) => {
+      if (!isCurrent) {
+        return;
+      }
+
       setError(toWorkspaceConfigError(err));
     });
 
     return () => {
+      isCurrent = false;
       agent.off('message', onMessage);
       agent.off('content_delta', onContentDelta);
       agent.off('tool_call', onToolCall);
@@ -243,6 +296,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
       agent.off('loading', onLoading);
       agent.off('error', onError);
       agent.off('mcp_auth_status', onMcpAuthStatus);
+      agent.cancel();
     };
   }, [agent, handleServerAuthStatus]);
 

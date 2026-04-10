@@ -27,11 +27,20 @@ export interface EmcyEmbeddedAuthIdentity {
   email?: string;
   organizationId?: string;
   displayName?: string;
+  avatarUrl?: string;
 }
 
 export interface EmcyEmbeddedAuthConfig {
   hostIdentity?: EmcyEmbeddedAuthIdentity;
   mismatchPolicy: 'block_with_switch';
+}
+
+export interface EmcyExternalUserContext {
+  id?: string;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  organizationId?: string;
 }
 
 export interface EmcyAgentConfig {
@@ -66,11 +75,30 @@ export interface EmcyAgentConfig {
   getAuthToken?: () => Promise<string | undefined>;
 
   /**
+   * Host app auth-session boundary for persisted MCP auth state.
+   * Use the current app session id so logging out forces MCP reconnect,
+   * even when the same browser later signs back in as the same user.
+   */
+  authSessionKey?: string | null;
+
+  /**
+   * @deprecated Use `authSessionKey`.
+   * Older alias for namespacing persisted MCP auth state in browser storage.
+   */
+  authStorageScope?: string | null;
+
+  /**
    * Embedded popup auth settings.
    * Use this to tell Emcy which host-app user is currently signed in so
    * the built-in popup flow can prefer the same downstream account.
    */
   embeddedAuth?: EmcyEmbeddedAuthConfig;
+
+  /**
+   * If true, MCP server calls include cookies (for cookie-based auth).
+   * Default: false
+   */
+  useCookies?: boolean;
 
   /**
    * Called when an MCP server requires authentication and the built-in
@@ -81,12 +109,6 @@ export interface EmcyAgentConfig {
    * The SDK stores the token and handles refresh automatically.
    */
   onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse | undefined>;
-
-  /**
-   * If true, MCP server calls include cookies (for cookie-based auth).
-   * Default: false
-   */
-  useCookies?: boolean;
 
   /** Optional: external user ID to associate with conversations */
   externalUserId?: string;

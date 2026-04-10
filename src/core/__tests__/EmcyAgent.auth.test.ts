@@ -3,8 +3,13 @@ import { EmcyAgent } from '../EmcyAgent';
 import {
   applyResolvedRegistration,
   buildRegistrationCacheKey,
+  loadStoredRegistration,
   saveStoredRegistration,
 } from '../auth/registration';
+import {
+  clearPersistedMcpAuth,
+  clearPersistedMcpAuthState,
+} from '../auth-storage';
 import type { AgentConfigResponse, McpServerAuthConfig, OAuthTokenResponse } from '../types';
 
 const MCP_SERVER_URL = 'https://todo.example.com';
@@ -405,6 +410,197 @@ describe('EmcyAgent auth behavior', () => {
     expect(token).toBe('cached-dcr-token');
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientMode).toBe('dcr');
     expect(secondAgent.getServerAuthConfig(MCP_SERVER_URL)?.clientId).toBe('dcr-client-123');
+  });
+
+  it('scopes persisted OAuth tokens by authSessionKey', async () => {
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      tokenUrl: 'https://auth.todo.example.com/oauth/token',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      discovered: true,
+    };
+
+    const firstAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'session-a',
+    });
+    (firstAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (firstAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'scoped-access-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    const sameSessionAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'session-a',
+    });
+    (sameSessionAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const otherSessionAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'session-b',
+    });
+    (otherSessionAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const sameSessionToken = await (sameSessionAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+    const otherSessionToken = await (otherSessionAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(sameSessionToken).toBe('scoped-access-token');
+    expect(otherSessionToken).toBeUndefined();
+  });
+
+  it('does not read legacy unscoped tokens when authSessionKey is present', async () => {
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+      tokenUrl: 'https://auth.todo.example.com/oauth/token',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      discovered: true,
+    };
+
+    const legacyAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+    });
+    (legacyAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (legacyAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'legacy-access-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    const scopedAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'fresh-session',
+    });
+    (scopedAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const token = await (scopedAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(token).toBeUndefined();
+  });
+
+  it('clears persisted MCP auth without deleting stored registrations', async () => {
+    const authConfig: McpServerAuthConfig = {
+      authType: 'oauth2',
+      authorizationServerUrl: 'https://auth.todo.example.com',
+      authorizationServerMetadataUrl:
+        'https://auth.todo.example.com/.well-known/oauth-authorization-server',
+      registrationEndpoint: 'https://auth.todo.example.com/connect/register',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      discovered: true,
+    };
+
+    const registrationCacheKey = buildRegistrationCacheKey(
+      authConfig,
+      'https://emcy.ai/oauth/callback',
+      'dcr',
+    );
+
+    saveStoredRegistration({
+      key: registrationCacheKey,
+      mode: 'dcr',
+      authorizationServerUrl: 'https://auth.todo.example.com',
+      authorizationServerMetadataUrl:
+        'https://auth.todo.example.com/.well-known/oauth-authorization-server',
+      registrationEndpoint: 'https://auth.todo.example.com/connect/register',
+      clientId: 'persisted-dcr-client',
+      callbackUrl: 'https://emcy.ai/oauth/callback',
+      resource: MCP_SERVER_URL,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const scopedAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'logout-session',
+    });
+    (scopedAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (scopedAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'logout-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    localStorage.setItem('emcy-oauth-callback:logout-state', JSON.stringify({ token: 'pending' }));
+    clearPersistedMcpAuthState({ authSessionKey: 'logout-session' });
+
+    expect(localStorage.getItem('emcy-oauth-callback:logout-state')).toBeNull();
+    expect(loadStoredRegistration(registrationCacheKey)?.clientId).toBe('persisted-dcr-client');
+
+    const postScopedClearAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'logout-session',
+    });
+    (postScopedClearAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const afterScopedClear = await (postScopedClearAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(afterScopedClear).toBeUndefined();
+
+    const userBAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'logout-session-b',
+    });
+    (userBAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+    (userBAgent as unknown as {
+      storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
+    }).storeOAuthToken(MCP_SERVER_URL, {
+      accessToken: 'user-b-token',
+      expiresIn: 3600,
+      resolvedAuthConfig: authConfig,
+    });
+
+    clearPersistedMcpAuth();
+
+    const postLogoutAgent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'workspace_test',
+      authSessionKey: 'logout-session-b',
+    });
+    (postLogoutAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
+      createWorkspaceConfig(authConfig);
+
+    const userBToken = await (postLogoutAgent as unknown as {
+      resolveToken: (url: string) => Promise<string | undefined>;
+    }).resolveToken(MCP_SERVER_URL);
+
+    expect(userBToken).toBeUndefined();
+    expect(loadStoredRegistration(registrationCacheKey)?.clientId).toBe('persisted-dcr-client');
   });
 
   it('emits connected auth status after popup auth initializes the MCP session', async () => {
