@@ -175,11 +175,11 @@ export class EmcyAgent {
     return this.config.apiKey;
   }
 
-  /** Initialize: fetch workspace config (tools, widget settings, MCP servers) */
+  /** Initialize: fetch agent config (tools, widget settings, MCP servers) */
   async init(): Promise<AgentConfigResponse> {
     const token = await this.resolveAuthToken();
     const response = await fetch(
-      `${this.config.agentServiceUrl}/api/v1/workspaces/${this.config.agentId}/config`,
+      `${this.config.agentServiceUrl}/api/v1/agents/${this.config.agentId}/config`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -377,7 +377,7 @@ export class EmcyAgent {
     this.updateMcpAuthStatus(mcpServerUrl, 'needs_auth');
   }
 
-  /** Get the auth config for an MCP server (from workspace config) */
+  /** Get the auth config for an MCP server (from agent config) */
   getServerAuthConfig(mcpServerUrl: string): McpServerAuthConfig | null {
     const server = this.agentConfig?.mcpServers?.find(s => s.url === mcpServerUrl);
     return server?.authConfig ?? null;

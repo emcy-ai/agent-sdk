@@ -14,10 +14,10 @@ import type { AgentConfigResponse, McpServerAuthConfig, OAuthTokenResponse } fro
 
 const MCP_SERVER_URL = 'https://todo.example.com';
 
-function createWorkspaceConfig(authConfig: McpServerAuthConfig): AgentConfigResponse {
+function createAgentConfig(authConfig: McpServerAuthConfig): AgentConfigResponse {
   return {
-    workspaceId: 'workspace_test',
-    name: 'Auth Workspace',
+    agentId: 'agent_test',
+    name: 'Auth Agent',
     mcpServers: [
       {
         id: 'server_todo',
@@ -46,8 +46,8 @@ describe('EmcyAgent auth behavior', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
-        return Response.json(createWorkspaceConfig({ authType: 'oauth2' }));
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json(createAgentConfig({ authType: 'oauth2' }));
       }
 
       if (url === 'https://todo.example.com/.well-known/oauth-protected-resource') {
@@ -77,7 +77,7 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     await agent.init();
@@ -96,8 +96,8 @@ describe('EmcyAgent auth behavior', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
-        return Response.json(createWorkspaceConfig({ authType: 'oauth2' }));
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json(createAgentConfig({ authType: 'oauth2' }));
       }
 
       if (url === 'https://todo.example.com/.well-known/oauth-protected-resource') {
@@ -131,7 +131,7 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     await agent.init();
@@ -147,8 +147,8 @@ describe('EmcyAgent auth behavior', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
-        return Response.json(createWorkspaceConfig({
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json(createAgentConfig({
           authType: 'oauth2',
           authorizationServerUrl: 'https://auth.todo.example.com',
           authorizationServerMetadataUrl:
@@ -183,7 +183,7 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     await agent.init();
@@ -197,8 +197,8 @@ describe('EmcyAgent auth behavior', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
-        return Response.json(createWorkspaceConfig({
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json(createAgentConfig({
           authType: 'oauth2',
           authorizationServerUrl: 'https://auth.todo.example.com',
           authorizationServerMetadataUrl:
@@ -234,7 +234,7 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     await agent.init();
@@ -247,7 +247,7 @@ describe('EmcyAgent auth behavior', () => {
   it('defaults local standalone OAuth helpers to the Emcy web origin when agentServiceUrl is localhost', () => {
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       agentServiceUrl: 'http://localhost:5150',
     });
 
@@ -257,11 +257,11 @@ describe('EmcyAgent auth behavior', () => {
     );
   });
 
-  it('surfaces the backend error message when workspace config auth fails', async () => {
+  it('surfaces the backend error message when agent config auth fails', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
         return Response.json(
           { error: 'Invalid or expired API key' },
           { status: 401 },
@@ -275,7 +275,7 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     await expect(agent.init()).rejects.toThrow('Invalid or expired API key');
@@ -318,10 +318,10 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
-    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig = createWorkspaceConfig(authConfig);
+    (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig = createAgentConfig(authConfig);
     (agent as unknown as { storeOAuthToken: (url: string, token: OAuthTokenResponse) => void })
       .storeOAuthToken(MCP_SERVER_URL, {
         accessToken: 'expired-access-token',
@@ -383,10 +383,10 @@ describe('EmcyAgent auth behavior', () => {
 
     const firstAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
     (firstAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(baseAuthConfig);
+      createAgentConfig(baseAuthConfig);
     (firstAgent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {
@@ -398,10 +398,10 @@ describe('EmcyAgent auth behavior', () => {
 
     const secondAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
     (secondAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(baseAuthConfig);
+      createAgentConfig(baseAuthConfig);
 
     const token = await (secondAgent as unknown as {
       resolveToken: (url: string) => Promise<string | undefined>;
@@ -424,11 +424,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const firstAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'session-a',
     });
     (firstAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
     (firstAgent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {
@@ -439,19 +439,19 @@ describe('EmcyAgent auth behavior', () => {
 
     const sameSessionAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'session-a',
     });
     (sameSessionAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const otherSessionAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'session-b',
     });
     (otherSessionAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const sameSessionToken = await (sameSessionAgent as unknown as {
       resolveToken: (url: string) => Promise<string | undefined>;
@@ -476,10 +476,10 @@ describe('EmcyAgent auth behavior', () => {
 
     const legacyAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
     (legacyAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
     (legacyAgent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {
@@ -490,11 +490,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const scopedAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'fresh-session',
     });
     (scopedAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const token = await (scopedAgent as unknown as {
       resolveToken: (url: string) => Promise<string | undefined>;
@@ -537,11 +537,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const scopedAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'logout-session',
     });
     (scopedAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
     (scopedAgent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {
@@ -558,11 +558,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const postScopedClearAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'logout-session',
     });
     (postScopedClearAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const afterScopedClear = await (postScopedClearAgent as unknown as {
       resolveToken: (url: string) => Promise<string | undefined>;
@@ -572,11 +572,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const userBAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'logout-session-b',
     });
     (userBAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
     (userBAgent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {
@@ -589,11 +589,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const postLogoutAgent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       authSessionKey: 'logout-session-b',
     });
     (postLogoutAgent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const userBToken = await (postLogoutAgent as unknown as {
       resolveToken: (url: string) => Promise<string | undefined>;
@@ -655,12 +655,12 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       onAuthRequired,
     });
 
     (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
 
     const events: string[] = [];
     agent.on('mcp_auth_status', (event) => {
@@ -710,11 +710,11 @@ describe('EmcyAgent auth behavior', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
     });
 
     (agent as unknown as { agentConfig: AgentConfigResponse }).agentConfig =
-      createWorkspaceConfig(authConfig);
+      createAgentConfig(authConfig);
     (agent as unknown as {
       storeOAuthToken: (url: string, token: OAuthTokenResponse) => void;
     }).storeOAuthToken(MCP_SERVER_URL, {

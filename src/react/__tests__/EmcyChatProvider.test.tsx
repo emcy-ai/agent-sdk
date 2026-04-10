@@ -9,9 +9,9 @@ import {
   type EmcyChatContextValue,
 } from '../EmcyChatProvider';
 
-const WORKSPACE_CONFIG: AgentConfigResponse = {
-  workspaceId: 'workspace_test',
-  name: 'Auth Workspace',
+const AGENT_CONFIG: AgentConfigResponse = {
+  agentId: 'agent_test',
+  name: 'Auth Agent',
   mcpServers: [],
   widgetConfig: null,
 };
@@ -28,7 +28,7 @@ const ProviderHarness = forwardRef<EmcyChatContextValue, { authSessionKey: strin
   ({ authSessionKey }, ref) => (
     <EmcyChatProvider
       apiKey="emcy-test-key"
-      agentId="workspace_test"
+      agentId="agent_test"
       authSessionKey={authSessionKey}
     >
       <ContextProbe ref={ref} />
@@ -43,8 +43,8 @@ describe('EmcyChatProvider', () => {
     vi.restoreAllMocks();
     localStorage.clear();
     vi.spyOn(EmcyAgent.prototype, 'init').mockImplementation(async function mockInit(this: EmcyAgent) {
-      (this as unknown as { agentConfig: AgentConfigResponse }).agentConfig = WORKSPACE_CONFIG;
-      return WORKSPACE_CONFIG;
+      (this as unknown as { agentConfig: AgentConfigResponse }).agentConfig = AGENT_CONFIG;
+      return AGENT_CONFIG;
     });
   });
 
@@ -60,7 +60,7 @@ describe('EmcyChatProvider', () => {
     const { rerender } = render(<ProviderHarness ref={ref} authSessionKey="session-a" />);
 
     await waitFor(() => {
-      expect(ref.current?.agentConfig?.workspaceId).toBe('workspace_test');
+      expect(ref.current?.agentConfig?.agentId).toBe('agent_test');
     });
 
     const firstAgent = ref.current!.agent;
@@ -90,7 +90,7 @@ describe('EmcyChatProvider', () => {
     });
 
     await waitFor(() => {
-      expect(ref.current?.agentConfig?.workspaceId).toBe('workspace_test');
+      expect(ref.current?.agentConfig?.agentId).toBe('agent_test');
     });
 
     expect(cancelSpy).toHaveBeenCalled();

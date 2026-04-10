@@ -29,14 +29,14 @@ type BuiltInOnAuthRequiredFn = OnAuthRequiredFn & {
   __emcyBuiltinPopupAuth?: boolean;
 };
 
-function toWorkspaceConfigError(error: unknown): SseError {
+function toAgentConfigError(error: unknown): SseError {
   const message = error instanceof Error && error.message.trim()
     ? error.message.trim()
-    : 'Failed to load workspace configuration.';
+    : 'Failed to load agent configuration.';
   const isAuthError = /api key|unauthorized|401/i.test(message);
 
   return {
-    code: isAuthError ? 'workspace_config_auth_error' : 'workspace_config_error',
+    code: isAuthError ? 'agent_config_auth_error' : 'agent_config_error',
     message,
   };
 }
@@ -282,7 +282,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         return;
       }
 
-      setError(toWorkspaceConfigError(err));
+      setError(toAgentConfigError(err));
     });
 
     return () => {

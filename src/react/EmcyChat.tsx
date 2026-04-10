@@ -31,7 +31,7 @@ export interface EmcyChatProps extends EmcyAgentConfig {
  * ```tsx
  * <EmcyChat
  *   apiKey="emcy_sk_xxxx_yyyy"
- *   agentId="ws_xxxxx"
+ *   agentId="ag_xxxxx"
  *   embeddedAuth={{
  *     hostIdentity: { email: session.user.email ?? undefined, subject: session.user.id },
  *     mismatchPolicy: 'block_with_switch',

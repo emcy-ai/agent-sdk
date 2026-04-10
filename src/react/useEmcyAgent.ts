@@ -15,14 +15,14 @@ import type {
 } from '../core/types';
 import type { McpServerStatus } from './components/McpServerStatusBar';
 
-function toWorkspaceConfigError(error: unknown): SseError {
+function toAgentConfigError(error: unknown): SseError {
   const message = error instanceof Error && error.message.trim()
     ? error.message.trim()
-    : 'Failed to load workspace configuration.';
+    : 'Failed to load agent configuration.';
   const isAuthError = /api key|unauthorized|401/i.test(message);
 
   return {
-    code: isAuthError ? 'workspace_config_auth_error' : 'workspace_config_error',
+    code: isAuthError ? 'agent_config_auth_error' : 'agent_config_error',
     message,
   };
 }
@@ -198,7 +198,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
         return;
       }
 
-      setError(toWorkspaceConfigError(err));
+      setError(toAgentConfigError(err));
     });
 
     return () => {

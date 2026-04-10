@@ -8,14 +8,14 @@ describe('ChatWindow', () => {
     cleanup();
   });
 
-  it('shows a blocking workspace auth error when config loading fails', () => {
+  it('shows a blocking agent auth error when config loading fails', () => {
     render(
       <ChatWindow
         messages={[]}
         streamingContent=""
         isLoading={false}
         error={{
-          code: 'workspace_config_auth_error',
+          code: 'agent_config_auth_error',
           message: 'Invalid or expired API key',
         }}
         onSend={vi.fn()}
@@ -23,9 +23,9 @@ describe('ChatWindow', () => {
       />,
     );
 
-    screen.getByText('Embedded workspace authentication failed');
+    screen.getByText('Embedded agent authentication failed');
     screen.getByText('Invalid or expired API key');
-    screen.getByText('Update the API key for this embedded workspace and reload the page.');
+    screen.getByText('Update the API key for this embedded agent and reload the page.');
     expect(screen.queryByText('How can I help you today?')).toBeNull();
     expect(screen.getByRole('textbox')).toHaveProperty('disabled', true);
   });

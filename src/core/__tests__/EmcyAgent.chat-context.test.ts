@@ -10,10 +10,10 @@ describe('EmcyAgent chat external user context', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
         return Response.json({
-          workspaceId: 'workspace_test',
-          name: 'Chat Workspace',
+          agentId: 'agent_test',
+          name: 'Chat Agent',
           mcpServers: [],
           widgetConfig: null,
         });
@@ -47,7 +47,7 @@ describe('EmcyAgent chat external user context', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       embeddedAuth: {
         mismatchPolicy: 'block_with_switch',
         hostIdentity: {
@@ -68,10 +68,10 @@ describe('EmcyAgent chat external user context', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === 'https://api.emcy.ai/api/v1/workspaces/workspace_test/config') {
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
         return Response.json({
-          workspaceId: 'workspace_test',
-          name: 'Chat Workspace',
+          agentId: 'agent_test',
+          name: 'Chat Agent',
           mcpServers: [],
           widgetConfig: null,
         });
@@ -102,7 +102,7 @@ describe('EmcyAgent chat external user context', () => {
 
     const agent = new EmcyAgent({
       apiKey: 'emcy-test-key',
-      agentId: 'workspace_test',
+      agentId: 'agent_test',
       externalUserId: 'customer-user-789',
       embeddedAuth: {
         mismatchPolicy: 'block_with_switch',
