@@ -48,7 +48,7 @@ export function ChatWindow({
   variant = 'floating',
 }: ChatWindowProps) {
   const containerStyle = variant === 'inline' ? styles.chatWindowInline : styles.chatWindow;
-  const blockingError = error && error.code.startsWith('workspace_config_') ? error : null;
+  const blockingError = error && error.code.startsWith('agent_config_') ? error : null;
 
   return (
     <div style={containerStyle}>
@@ -113,7 +113,7 @@ export function ChatWindow({
         disabled={isLoading || Boolean(blockingError)}
         placeholder={
           blockingError
-            ? 'Embedded workspace unavailable'
+            ? 'Embedded agent unavailable'
             : placeholder
         }
       />

@@ -77,7 +77,7 @@ export function MessageList({
   const showThinking = isThinking && !streamingContent && !hasActiveToolCall;
 
   if (blockingError && visibleMessages.length === 0 && !streamingContent && !showThinking) {
-    const isAuthError = blockingError.code === 'workspace_config_auth_error';
+    const isAuthError = blockingError.code === 'agent_config_auth_error';
 
     return (
       <div style={styles.messageList}>
@@ -85,13 +85,13 @@ export function MessageList({
           <div style={styles.blockingStateCard} role="alert" aria-live="assertive">
             <span style={styles.blockingStateEyebrow}>Configuration error</span>
             <h4 style={styles.blockingStateTitle}>
-              {isAuthError ? 'Embedded workspace authentication failed' : 'Unable to load workspace'}
+              {isAuthError ? 'Embedded agent authentication failed' : 'Unable to load agent'}
             </h4>
             <p style={styles.blockingStateMessage}>{blockingError.message}</p>
             <p style={styles.blockingStateHint}>
               {isAuthError
-                ? 'Update the API key for this embedded workspace and reload the page.'
-                : 'Check the workspace configuration and reload the page.'}
+                ? 'Update the API key for this embedded agent and reload the page.'
+                : 'Check the agent configuration and reload the page.'}
             </p>
           </div>
         </div>

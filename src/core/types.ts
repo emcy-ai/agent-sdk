@@ -143,7 +143,7 @@ export interface ChatMessage {
 }
 
 // ================================================================
-// Agent Config Response (from GET /workspaces/{id}/config)
+// Agent Config Response (from GET /agents/{id}/config)
 // ================================================================
 
 export interface McpServerAuthConfig {
@@ -282,7 +282,7 @@ export interface McpServerInfo {
 }
 
 export interface AgentConfigResponse {
-  workspaceId: string;
+  agentId: string;
   name: string;
   /** @deprecated Use mcpServers instead */
   mcpServerUrl?: string;

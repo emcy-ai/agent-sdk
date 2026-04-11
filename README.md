@@ -22,7 +22,7 @@ function App() {
     <div style={{ height: 640 }}>
       <EmcyChat
         apiKey="emcy_sk_xxxx"
-        agentId="ws_xxxxx"
+        agentId="ag_xxxxx"
         authSessionKey={currentSession.id}
         mode="inline"
         title="AI Assistant"
@@ -49,7 +49,7 @@ import { EmcyAgent } from "@emcy/agent-sdk";
 
 const agent = new EmcyAgent({
   apiKey: "emcy_sk_xxxx",
-  agentId: "ws_xxxxx",
+  agentId: "ag_xxxxx",
   authSessionKey: currentSession.id,
   embeddedAuth: {
     hostIdentity: {
@@ -68,7 +68,7 @@ await agent.init();
 | Option | Type | Description |
 | ------ | ---- | ----------- |
 | `apiKey` | `string` | Emcy API key |
-| `agentId` | `string` | Workspace or agent ID |
+| `agentId` | `string` | Agent or agent ID |
 | `agentServiceUrl` | `string` | Emcy API URL. Defaults to `https://api.emcy.ai`. |
 | `oauthCallbackUrl` | `string` | Override Emcy's popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when running locally. |
 | `oauthClientMetadataUrl` | `string` | Override Emcy's popup client metadata URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when running locally. |
@@ -79,7 +79,7 @@ await agent.init();
 | `externalUserId` | `string` | Optional user identifier for conversations. |
 | `context` | `Record<string, unknown>` | Extra context sent with each message. |
 
-When present, `externalUserId` and `embeddedAuth.hostIdentity` are combined into a typed `externalUser` payload on chat requests so Emcy workspaces can attribute usage and budgets per embedded end user.
+When present, `externalUserId` and `embeddedAuth.hostIdentity` are combined into a typed `externalUser` payload on chat requests so Emcy agents can attribute usage and budgets per embedded end user.
 
 ## Embedded Auth
 
@@ -100,7 +100,7 @@ Important behavior:
 - consumer apps do not need to host OAuth callback routes
 - consumer apps do not need to host OAuth client metadata routes
 - the popup flow survives normal React rerenders
-- the embedded flow can use the same downstream OAuth structure as the Emcy workspace product
+- the embedded flow can use the same downstream OAuth structure as the Emcy agent product
 
 ### `embeddedAuth`
 
@@ -135,7 +135,7 @@ Use `authSessionKey` on every mounted SDK surface and call `clearPersistedMcpAut
 
 ## Standalone Popup Auth
 
-If you do not pass `embeddedAuth`, the SDK still uses Emcy-owned popup OAuth for MCP servers that require auth. That keeps the hosted workspace flow and public-client embed flow on the same standards-based path.
+If you do not pass `embeddedAuth`, the SDK still uses Emcy-owned popup OAuth for MCP servers that require auth. That keeps the hosted agent flow and public-client embed flow on the same standards-based path.
 
 If you need to fully replace the built-in popup controller, provide `onAuthRequired`.
 
