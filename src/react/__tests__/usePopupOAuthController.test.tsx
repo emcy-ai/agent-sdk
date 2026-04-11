@@ -1,6 +1,6 @@
 import React, { forwardRef, useImperativeHandle } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { McpServerAuthConfig, OAuthTokenResponse } from '../../core/types';
 import { usePopupOAuthController } from '../usePopupOAuthController';
 
@@ -13,6 +13,7 @@ type HarnessHandle = {
     serverUrl: string,
     authStatus: 'connected' | 'needs_auth',
   ) => void;
+  startOrRetryPopupAuth: () => void;
 };
 
 const SERVER_URL = 'https://todo.example.com/mcp';
@@ -38,7 +39,8 @@ const ControllerHarness = forwardRef<HarnessHandle, { authSessionKey?: string | 
   useImperativeHandle(ref, () => ({
     requestAuth: controller.requestAuth,
     handleServerAuthStatus: controller.handleServerAuthStatus,
-  }), [controller.handleServerAuthStatus, controller.requestAuth]);
+    startOrRetryPopupAuth: controller.startOrRetryPopupAuth,
+  }), [controller.handleServerAuthStatus, controller.requestAuth, controller.startOrRetryPopupAuth]);
 
   return <div>{controller.popupState?.phase ?? 'idle'}</div>;
 });
@@ -48,6 +50,7 @@ ControllerHarness.displayName = 'ControllerHarness';
 describe('usePopupOAuthController', () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it('dismisses a stale popup prompt once the same MCP server reports connected', async () => {
@@ -83,5 +86,43 @@ describe('usePopupOAuthController', () => {
 
     await expect(pendingRequest).resolves.toBeUndefined();
     expect(screen.getByText('idle')).toBeDefined();
+  });
+
+  it('opens the auth popup before async OAuth preparation finishes', async () => {
+    const ref = React.createRef<HarnessHandle>();
+    const popupWindow = {
+      closed: false,
+      close: vi.fn(),
+      focus: vi.fn(),
+      location: { replace: vi.fn() },
+    } as unknown as Window;
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popupWindow);
+
+    let resolveDigest: ((value: ArrayBuffer) => void) | null = null;
+    const digestPromise = new Promise<ArrayBuffer>((resolve) => {
+      resolveDigest = resolve;
+    });
+    vi.spyOn(crypto.subtle, 'digest').mockReturnValue(digestPromise);
+
+    render(<ControllerHarness ref={ref} />);
+
+    await act(async () => {
+      ref.current?.requestAuth(SERVER_URL, AUTH_CONFIG);
+    });
+
+    act(() => {
+      ref.current?.startOrRetryPopupAuth();
+    });
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('preparing')).toBeDefined();
+    expect(popupWindow.location.replace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveDigest?.(new ArrayBuffer(32));
+      await digestPromise;
+    });
+
+    expect(popupWindow.location.replace).toHaveBeenCalledTimes(1);
   });
 });
