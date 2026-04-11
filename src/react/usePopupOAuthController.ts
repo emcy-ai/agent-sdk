@@ -430,6 +430,37 @@ export function usePopupOAuthController(
       );
     }
 
+    request.codeVerifier = generateCodeVerifier();
+    request.state = crypto.randomUUID();
+    request.handledCallback = false;
+
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popupContext = encodeURIComponent(JSON.stringify({
+      openerOrigin: window.location.origin,
+      expectedState: request.state,
+    }));
+
+    const popupWindow = window.open(
+      '',
+      `emcy-auth:${popupContext}`,
+      `width=${width},height=${height},left=${left},top=${top},popup=true`,
+    );
+
+    if (!popupWindow) {
+      transitionActiveRequest(
+        'blocked',
+        'Your browser blocked the sign-in popup. Allow popups and try again.',
+      );
+      return;
+    }
+
+    request.popupWindow = popupWindow;
+    request.popupWindow.focus?.();
+
     let effectiveAuthConfig = request.authConfig;
 
     try {
@@ -445,6 +476,7 @@ export function usePopupOAuthController(
 
       request.resolvedAuthConfig = effectiveAuthConfig;
     } catch (error) {
+      closePopupWindow(request);
       transitionActiveRequest(
         'error',
         error instanceof Error
@@ -457,14 +489,12 @@ export function usePopupOAuthController(
     const callbackUrl = getCallbackUrl(effectiveAuthConfig);
     const loginUrl = effectiveAuthConfig.authorizationEndpoint ?? effectiveAuthConfig.loginUrl;
     if (!loginUrl) {
+      closePopupWindow(request);
       transitionActiveRequest('error', 'This MCP server is missing an authorization endpoint.');
       return;
     }
 
-    const codeVerifier = generateCodeVerifier();
-    request.codeVerifier = codeVerifier;
-    request.state = crypto.randomUUID();
-    request.handledCallback = false;
+    const codeVerifier = request.codeVerifier;
 
     let authUrl = '';
 
@@ -525,31 +555,26 @@ export function usePopupOAuthController(
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
     }
 
-    const width = 500;
-    const height = 600;
-    const left = window.screenX + (window.outerWidth - width) / 2;
-    const top = window.screenY + (window.outerHeight - height) / 2;
-
-    const popupContext = encodeURIComponent(JSON.stringify({
-      openerOrigin: window.location.origin,
-      expectedState: request.state,
-    }));
-
-    const popupWindow = window.open(
-      authUrl,
-      `emcy-auth:${popupContext}`,
-      `width=${width},height=${height},left=${left},top=${top},popup=true`,
-    );
-
-    if (!popupWindow) {
+    if (request.popupWindow.closed) {
       transitionActiveRequest(
-        'blocked',
-        'Your browser blocked the sign-in popup. Allow popups and try again.',
+        'canceled',
+        'The sign-in window was closed before authentication completed.',
       );
       return;
     }
 
-    request.popupWindow = popupWindow;
+    try {
+      request.popupWindow.location.replace(authUrl);
+    } catch {
+      closePopupWindow(request);
+      transitionActiveRequest(
+        'error',
+        'The sign-in popup could not be opened. Try again.',
+      );
+      return;
+    }
+    request.popupWindow.focus?.();
+
     request.pollTimer = setInterval(() => {
       const activeRequest = activeRequestRef.current;
       if (!activeRequest || activeRequest !== request) {
