@@ -420,34 +420,14 @@ export function usePopupOAuthController(
       return;
     }
 
-    clearStoredCallbackPayload(request.state);
-    closePopupWindow(request);
-    clearPollTimer(request);
-
-    if (mountedRef.current) {
-      setPopupState(
-        createPopupState(request, 'preparing', 'Preparing secure sign in...'),
-      );
-    }
-
-    request.codeVerifier = generateCodeVerifier();
-    request.state = crypto.randomUUID();
-    request.handledCallback = false;
-
     const width = 500;
     const height = 600;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
-
-    const popupContext = encodeURIComponent(JSON.stringify({
-      openerOrigin: window.location.origin,
-      expectedState: request.state,
-    }));
-
     const popupWindow = window.open(
-      '',
-      `emcy-auth:${popupContext}`,
-      `width=${width},height=${height},left=${left},top=${top},popup=true`,
+      'about:blank',
+      'emcy-auth-popup',
+      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
     );
 
     if (!popupWindow) {
@@ -460,6 +440,35 @@ export function usePopupOAuthController(
 
     request.popupWindow = popupWindow;
     request.popupWindow.focus?.();
+
+    clearStoredCallbackPayload(request.state);
+    clearPollTimer(request);
+
+    request.codeVerifier = generateCodeVerifier();
+    request.state = crypto.randomUUID();
+    request.handledCallback = false;
+
+    const popupContext = encodeURIComponent(JSON.stringify({
+      openerOrigin: window.location.origin,
+      expectedState: request.state,
+    }));
+
+    try {
+      request.popupWindow.name = `emcy-auth:${popupContext}`;
+    } catch {
+      closePopupWindow(request);
+      transitionActiveRequest(
+        'error',
+        'The sign-in popup could not be opened. Try again.',
+      );
+      return;
+    }
+
+    if (mountedRef.current) {
+      setPopupState(
+        createPopupState(request, 'preparing', 'Preparing secure sign in...'),
+      );
+    }
 
     let effectiveAuthConfig = request.authConfig;
 
