@@ -3,6 +3,7 @@ import type {
   AgentConfigResponse,
   AuthorizationServerMetadata,
   ChatMessage,
+  ClientToolsMap,
   ClientToolParameter,
   EmcyAgentEvent,
   EmcyAgentEventMap,
@@ -325,6 +326,22 @@ export class EmcyAgent {
   /** Whether a request is currently in flight */
   getIsLoading(): boolean {
     return this.isLoading;
+  }
+
+  /** Update the per-turn host context sent with each chat request. */
+  setContext(context: Record<string, unknown> | undefined): void {
+    this.config = {
+      ...this.config,
+      context,
+    };
+  }
+
+  /** Update the client tools exposed to the agent without recreating the session. */
+  setClientTools(clientTools: ClientToolsMap | undefined): void {
+    this.config = {
+      ...this.config,
+      clientTools,
+    };
   }
 
   /**
@@ -1166,6 +1183,7 @@ export class EmcyAgent {
             conversationId: this.conversationId!,
             toolCallId: toolCall.toolCallId,
             result: toolResult,
+            context: this.config.context,
           };
           const clientToolsSchemas = this.clientToolsToSchemas();
           if (clientToolsSchemas.length > 0) {
@@ -1206,6 +1224,7 @@ export class EmcyAgent {
               toolCallId: toolCall.toolCallId,
               result: errorResult,
               isError: true,
+              context: this.config.context,
             };
             const clientToolsSchemas = this.clientToolsToSchemas();
             if (clientToolsSchemas.length > 0) {

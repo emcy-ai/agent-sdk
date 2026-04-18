@@ -300,6 +300,11 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     };
   }, [agent, handleServerAuthStatus]);
 
+  useEffect(() => {
+    agent.setContext(config.context);
+    agent.setClientTools(config.clientTools);
+  }, [agent, config.clientTools, config.context]);
+
   const sendMessage = async (message: string) => {
     await agent.sendMessage(message);
   };

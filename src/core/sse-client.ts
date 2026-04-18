@@ -7,12 +7,49 @@ export interface ParsedSseEvent {
   data: unknown;
 }
 
+function* parseEventBlocks(input: string): Generator<ParsedSseEvent> {
+  const normalized = input.replace(/\r\n/g, '\n');
+  const eventBlocks = normalized.split('\n\n');
+
+  for (const eventBlock of eventBlocks) {
+    if (!eventBlock.trim()) continue;
+
+    let eventType = '';
+    const dataLines: string[] = [];
+
+    for (const line of eventBlock.split('\n')) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice('event: '.length);
+      } else if (line.startsWith('data: ')) {
+        dataLines.push(line.slice('data: '.length));
+      } else if (line === 'data:') {
+        dataLines.push('');
+      }
+    }
+
+    if (!eventType || dataLines.length === 0) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(dataLines.join('\n'));
+      yield { type: eventType, data: parsed };
+    } catch {
+      // Skip malformed JSON payloads.
+    }
+  }
+}
+
 export async function* parseSseStream(
   response: Response,
   signal?: AbortSignal,
 ): AsyncGenerator<ParsedSseEvent> {
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) {
+    const text = await response.text().catch(() => '');
+    yield* parseEventBlocks(text);
+    return;
+  }
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -25,34 +62,19 @@ export async function* parseSseStream(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
+      const normalized = buffer.replace(/\r\n/g, '\n');
 
       // Split on double newlines (SSE event boundary)
-      const events = buffer.split('\n\n');
+      const events = normalized.split('\n\n');
       buffer = events.pop() ?? '';
 
       for (const eventBlock of events) {
-        if (!eventBlock.trim()) continue;
-
-        let eventType = '';
-        let eventData = '';
-
-        for (const line of eventBlock.split('\n')) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice('event: '.length);
-          } else if (line.startsWith('data: ')) {
-            eventData = line.slice('data: '.length);
-          }
-        }
-
-        if (eventType && eventData) {
-          try {
-            const parsed = JSON.parse(eventData);
-            yield { type: eventType, data: parsed };
-          } catch {
-            // Skip malformed JSON
-          }
-        }
+        yield* parseEventBlocks(eventBlock);
       }
+    }
+
+    if (buffer.trim()) {
+      yield* parseEventBlocks(buffer);
     }
   } finally {
     reader.releaseLock();

@@ -171,9 +171,13 @@ function isLoopbackHost(hostname: string): boolean {
 function inferApplicationType(callbackUrl: string): 'web' | 'native' {
   try {
     const url = new URL(callbackUrl);
-    return isLoopbackHost(url.hostname) ? 'native' : 'web';
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return isLoopbackHost(url.hostname) ? 'native' : 'web';
+    }
+
+    return 'native';
   } catch {
-    return 'web';
+    return 'native';
   }
 }
 

@@ -216,6 +216,11 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     };
   }, [agent]);
 
+  useEffect(() => {
+    agent.setContext(config.context);
+    agent.setClientTools(config.clientTools);
+  }, [agent, config.clientTools, config.context]);
+
   const sendMessage = async (message: string) => {
     await agent.sendMessage(message);
   };
