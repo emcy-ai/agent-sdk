@@ -34,7 +34,16 @@ export function getEffectiveCallbackUrl(
   authConfig: McpServerAuthConfig | null | undefined,
   fallbackCallbackUrl: string,
 ): string {
-  return authConfig?.callbackUrl ?? fallbackCallbackUrl;
+  const configuredCallbackUrl = authConfig?.callbackUrl?.trim();
+  if (!configuredCallbackUrl) {
+    return fallbackCallbackUrl;
+  }
+
+  if (isNativeCallbackUrl(fallbackCallbackUrl) && !isNativeCallbackUrl(configuredCallbackUrl)) {
+    return fallbackCallbackUrl;
+  }
+
+  return configuredCallbackUrl;
 }
 
 export function buildRegistrationCacheKey(
@@ -166,6 +175,15 @@ function shouldAttemptMode(
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+}
+
+function isNativeCallbackUrl(callbackUrl: string): boolean {
+  try {
+    const url = new URL(callbackUrl);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch {
+    return !callbackUrl.startsWith('http://') && !callbackUrl.startsWith('https://');
+  }
 }
 
 function inferApplicationType(callbackUrl: string): 'web' | 'native' {
