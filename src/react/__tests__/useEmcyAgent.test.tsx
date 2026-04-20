@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmcyAgent } from '../../core/EmcyAgent';
-import type { AgentConfigResponse, ChatMessage } from '../../core/types';
+import type { AgentConfigResponse, ChatMessage, SseError } from '../../core/types';
 import { useEmcyAgent, type UseEmcyAgentReturn } from '../useEmcyAgent';
 
 const AGENT_CONFIG: AgentConfigResponse = {
@@ -83,5 +83,31 @@ describe('useEmcyAgent', () => {
     });
 
     expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it('stays ready after a turn-level error once the agent has initialized', async () => {
+    const ref = React.createRef<UseEmcyAgentReturn>();
+    render(<TestHarness ref={ref} authSessionKey="session-a" />);
+
+    await waitFor(() => {
+      expect(ref.current?.agentConfig?.agentId).toBe('agent_test');
+      expect(ref.current?.isReady).toBe(true);
+    });
+
+    const turnError: SseError = {
+      code: 'overloaded',
+      message: 'Overloaded',
+    };
+
+    await act(async () => {
+      (ref.current!.agent as unknown as {
+        emit: (event: 'error', payload: SseError) => void;
+      }).emit('error', turnError);
+    });
+
+    await waitFor(() => {
+      expect(ref.current?.error?.message).toBe('Overloaded');
+      expect(ref.current?.isReady).toBe(true);
+    });
   });
 });

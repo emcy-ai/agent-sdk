@@ -31,6 +31,7 @@ export interface UseEmcyAgentReturn {
   agent: EmcyAgent;
   conversationId: string | null;
   messages: ChatMessage[];
+  isReady: boolean;
   isLoading: boolean;
   isThinking: boolean;
   error: SseError | null;
@@ -44,17 +45,26 @@ export interface UseEmcyAgentReturn {
   streamingContent: string;
 }
 
+export interface UseEmcyAgentOptions {
+  enabled?: boolean;
+}
+
 /**
  * React hook for programmatic use of EmcyAgent.
  * Use this when you want full control over the UI.
  */
-export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
+export function useEmcyAgent(
+  config: EmcyAgentConfig,
+  options?: UseEmcyAgentOptions,
+): UseEmcyAgentReturn {
   const latestConfigRef = useRef(config);
   latestConfigRef.current = config;
+  const enabled = options?.enabled ?? true;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<SseError | null>(null);
+  const [agentConfigError, setAgentConfigError] = useState<SseError | null>(null);
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
@@ -83,6 +93,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     setMessages([]);
     setStreamingContent('');
     setError(null);
+    setAgentConfigError(null);
     setIsThinking(false);
     setIsLoading(false);
     setAgentConfig(null);
@@ -91,6 +102,19 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
   }, [authSessionKey]);
 
   useEffect(() => {
+    if (!enabled) {
+      setConversationId(null);
+      setMessages([]);
+      setStreamingContent('');
+      setError(null);
+      setAgentConfigError(null);
+      setIsThinking(false);
+      setIsLoading(false);
+      setAgentConfig(null);
+      setMcpServers([]);
+      return;
+    }
+
     let isCurrent = true;
 
     const onMessage = (msg: ChatMessage) => {
@@ -191,6 +215,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
       }
 
       setAgentConfig(config);
+      setAgentConfigError(null);
       setMcpServers(agent.getMcpServers());
       setConversationId(agent.getConversationId());
     }).catch((err) => {
@@ -198,7 +223,9 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
         return;
       }
 
-      setError(toAgentConfigError(err));
+      const nextError = toAgentConfigError(err);
+      setAgentConfigError(nextError);
+      setError(nextError);
     });
 
     return () => {
@@ -214,7 +241,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
       agent.off('mcp_auth_status', onMcpAuthStatus);
       agent.cancel();
     };
-  }, [agent]);
+  }, [agent, enabled]);
 
   useEffect(() => {
     agent.setContext(config.context);
@@ -252,6 +279,7 @@ export function useEmcyAgent(config: EmcyAgentConfig): UseEmcyAgentReturn {
     agent,
     conversationId,
     messages,
+    isReady: enabled && agentConfig !== null && agentConfigError === null,
     isLoading,
     isThinking,
     error,

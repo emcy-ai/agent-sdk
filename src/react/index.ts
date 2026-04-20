@@ -5,7 +5,7 @@ export { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
 export type { EmcyChatProviderProps, EmcyChatContextValue } from './EmcyChatProvider';
 
 export { useEmcyAgent } from './useEmcyAgent';
-export type { UseEmcyAgentReturn } from './useEmcyAgent';
+export type { UseEmcyAgentOptions, UseEmcyAgentReturn } from './useEmcyAgent';
 
 // Sub-components (for advanced composition)
 export { ChatWindow } from './components/ChatWindow';

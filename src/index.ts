@@ -1,5 +1,21 @@
 export { EmcyAgent } from './core/EmcyAgent';
 export { clearPersistedMcpAuth, clearPersistedMcpAuthState } from './core/auth-storage';
+export {
+  applyUserMessageOverrides,
+  buildRenderedNodes,
+  createInlinePendingTurnState,
+  deriveConversationMessages,
+  deriveConversationStatusLabel,
+  deriveInlineFeedState,
+  deriveToolMessages,
+  deriveToolStatusPresentation,
+  deriveVisibleMessages,
+  formatStructuredText,
+  getLatestAssistantMessage,
+  getLatestToolMessage,
+  getLatestUserMessage,
+  summarizeConversationId,
+} from './shell';
 export type { ClearPersistedMcpAuthStateOptions } from './core/auth-storage';
 export type {
   ClientToolDefinition,
@@ -22,3 +38,14 @@ export type {
   SseMessageEnd,
   SseError,
 } from './core/types';
+export type {
+  AgentAssistantMessage,
+  AgentConversationMessage,
+  AgentInlineFeedState,
+  AgentInlinePendingTurnState,
+  AgentRenderedNode,
+  AgentToolCallMessage,
+  AgentToolStatusPresentation,
+  AgentUserMessage,
+  AgentVisibleMessage,
+} from './shell';

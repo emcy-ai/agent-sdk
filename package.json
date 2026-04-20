@@ -19,6 +19,16 @@
       "types": "./dist/react/index.d.ts",
       "import": "./dist/react/index.mjs",
       "require": "./dist/react/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.mjs",
+      "require": "./dist/react-native/index.js"
+    },
+    "./shell": {
+      "types": "./dist/shell/index.d.ts",
+      "import": "./dist/shell/index.mjs",
+      "require": "./dist/shell/index.js"
     }
   },
   "files": [
