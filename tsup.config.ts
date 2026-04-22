@@ -10,7 +10,15 @@ export default defineConfig([
     external: ['react', 'react-dom'],
   },
   {
-    entry: ['src/react/index.ts'],
+    entry: ['src/react-embed/index.ts'],
+    format: ['cjs', 'esm'],
+    dts: true,
+    sourcemap: true,
+    outDir: 'dist/react-embed',
+    external: ['react', 'react-dom'],
+  },
+  {
+    entry: ['src/react-app/index.tsx'],
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
@@ -18,7 +26,7 @@ export default defineConfig([
     external: ['react', 'react-dom'],
   },
   {
-    entry: ['src/react-native/index.ts'],
+    entry: ['src/react-native/index.tsx'],
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
@@ -26,10 +34,10 @@ export default defineConfig([
     external: ['react', 'react-native'],
   },
   {
-    entry: ['src/shell/index.ts'],
+    entry: ['src/app/index.ts'],
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
-    outDir: 'dist/shell',
+    outDir: 'dist/app',
   },
 ]);

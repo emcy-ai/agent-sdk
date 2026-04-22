@@ -2,13 +2,7 @@
 
 Use Emcy agents in your app.
 
-This package gives you:
-
-- a hosted agent runtime
-- MCP-aware chat
-- embedded OAuth for MCP servers
-- a drop-in React UI
-- lower-level hooks for custom web and native shells
+This package now has one public model for custom product integrations: `App Agent`.
 
 ## Install
 
@@ -16,48 +10,53 @@ This package gives you:
 npm install @emcy/agent-sdk
 ```
 
-## Start Here
+## Package surfaces
 
-## The 2 Product Modes
+### `@emcy/agent-sdk`
 
-### 1. Embed mode
+Low-level runtime:
 
-Use this when you want the standard Emcy-style assistant in your app with minimal work.
+- `EmcyAgent`
+- core auth helpers
+- core transport and types
 
-Typical cases:
+### `@emcy/agent-sdk/app`
 
-- support assistant
-- ops assistant
-- internal admin sidebar
-- customer-facing in-app widget
+Framework-agnostic agent experience helpers:
 
-Start with:
+- `createAppAgent`
+- `AppAgentController`
+- message / tool derivation helpers
+- resume / pending-turn / formatting helpers
+
+### `@emcy/agent-sdk/react`
+
+React app integration:
+
+- `useAppAgent`
+- `AppAgentProvider`
+- `useAppAgentContext`
+
+### `@emcy/agent-sdk/react-native`
+
+React Native app integration:
+
+- `useAppAgent`
+- `AppAgentProvider`
+- `useAppAgentContext`
+
+### `@emcy/agent-sdk/react-embed`
+
+Drop-in web widget:
 
 - `EmcyChat`
-- or `EmcyChatProvider`
 
-### 2. First-party app shell mode
+## Start here
 
-Use this when the assistant is part of your product experience and should feel native to your app.
-
-Typical cases:
-
-- docked assistant in app chrome
-- mobile bottom sheet assistant
-- transcript + systems panels
-- app-specific tool visibility
-- custom workflow / approval UI
-
-Start with:
-
-- `@emcy/agent-sdk/react-native`
-- `@emcy/agent-sdk/shell`
-- or `useEmcyAgent` / `EmcyAgent` for custom web
-
-## Fastest Example: Standard Web Embed
+### 1. Drop-in web embed
 
 ```tsx
-import { EmcyChat } from "@emcy/agent-sdk/react";
+import { EmcyChat } from "@emcy/agent-sdk/react-embed";
 
 export function App() {
   return (
@@ -65,74 +64,69 @@ export function App() {
       <EmcyChat
         apiKey="emcy_sk_xxxx"
         agentId="ag_xxxxx"
-        authSessionKey={session.id}
-        embeddedAuth={{
-          hostIdentity: {
-            subject: session.user.id,
-            email: session.user.email,
-            organizationId: session.organizationId,
-          },
-          mismatchPolicy: "block_with_switch",
+        appSessionKey={session.id}
+        userIdentity={{
+          subject: session.user.id,
+          email: session.user.email,
+          organizationId: session.organizationId,
         }}
+        mode="inline"
+        title="Support Agent"
       />
     </div>
   );
 }
 ```
 
-## Custom Web UI
+### 2. Custom React app UI
 
 ```tsx
-import { EmcyChatProvider, useEmcyChatContext } from "@emcy/agent-sdk/react";
+import { useAppAgent } from "@emcy/agent-sdk/react";
 
-function CustomAssistant() {
-  const { messages, sendMessage, streamingContent, isLoading } =
-    useEmcyChatContext();
-  return null;
-}
-
-export function App() {
-  return (
-    <EmcyChatProvider
-      apiKey="emcy_sk_xxxx"
-      agentId="ag_xxxxx"
-      authSessionKey={session.id}
-    >
-      <CustomAssistant />
-    </EmcyChatProvider>
-  );
-}
-```
-
-## Custom React Native UI
-
-```tsx
-import { useEmcyAgentRuntime } from "@emcy/agent-sdk/react-native";
-import { deriveToolMessages } from "@emcy/agent-sdk/shell";
-
-export function AssistantShell() {
-  const agent = useEmcyAgentRuntime({
+export function CustomAssistant() {
+  const agent = useAppAgent({
     apiKey: "emcy_sk_xxxx",
     agentId: "ag_xxxxx",
-    authSessionKey: session.id,
-    embeddedAuth: {
-      hostIdentity: {
-        subject: session.user.id,
-        email: session.user.email,
-        organizationId: session.organizationId,
-      },
-      mismatchPolicy: "block_with_switch",
+    appSessionKey: session.id,
+    userIdentity: {
+      subject: session.user.id,
+      email: session.user.email,
+      organizationId: session.organizationId,
     },
-    clientTools,
-    context,
+    hostActions,
+    appContext,
   });
 
-  const toolMessages = deriveToolMessages(agent.messages);
   return null;
 }
 ```
 
-## Raw Runtime
+### 3. Custom React Native UI
+
+```tsx
+import { useAppAgent } from "@emcy/agent-sdk/react-native";
+
+export function AssistantShell() {
+  const agent = useAppAgent({
+    apiKey: "emcy_sk_xxxx",
+    agentId: "ag_xxxxx",
+    appSessionKey: session.id,
+    userIdentity: {
+      subject: session.user.id,
+      email: session.user.email,
+      organizationId: session.organizationId,
+    },
+    hostActions,
+    appContext,
+    platform,
+  });
+
+  const toolMessages = agent.conversation.toolMessages;
+  return null;
+}
+```
+
+### 4. Raw runtime
 
 ```ts
 import { EmcyAgent } from "@emcy/agent-sdk";
@@ -147,7 +141,7 @@ await agent.init();
 await agent.sendMessage("Hello");
 ```
 
-## The 3 Config Options That Matter Most
+## Core app-agent config
 
 ### `apiKey`
 
@@ -157,95 +151,50 @@ Your Emcy API key.
 
 The agent to run.
 
-### `authSessionKey`
+### `appSessionKey`
 
-Your app’s current signed-in session boundary.
+Your host app’s current signed-in session boundary.
 
-Pass this so cached MCP auth does not leak across logout/login cycles.
+Pass this so persisted MCP auth and resumed conversations do not leak across logout/login cycles.
 
-## Embedded Auth
+### `userIdentity`
 
-If an MCP server needs user-scoped OAuth, pass `embeddedAuth`.
+The signed-in host user:
 
 ```ts
-embeddedAuth: {
-  hostIdentity: {
-    subject: session.user.id,
-    email: session.user.email,
-    organizationId: session.organizationId,
-  },
-  mismatchPolicy: "block_with_switch",
+userIdentity: {
+  subject: session.user.id,
+  email: session.user.email,
+  organizationId: session.organizationId,
 }
 ```
 
-What this does:
+### `hostActions`
 
-- tells Emcy who your current signed-in app user is
-- lets Emcy try same-user downstream auth
-- blocks the wrong downstream account from silently connecting
+App-owned functions the agent can call locally for UI work or host orchestration.
 
-Important:
+### `appContext`
 
-- your app does **not** receive MCP access tokens
-- Emcy owns the popup OAuth helper flow by default
+Extra host context or policy instructions for the agent.
 
-## If You Want To Replace The Built-In Auth Popup
+## OAuth
 
-Use `onAuthRequired`.
+If an MCP server needs user-scoped OAuth:
 
-That is an advanced override for custom auth UX.
+- pass `userIdentity`
+- let Emcy manage the popup flow by default
+- override with `onAuthRequired` only when you need custom host auth UX
 
-Most apps should not need it.
+## Localhost defaults
 
-## Localhost Defaults
-
-When `agentServiceUrl` points to localhost, the SDK defaults popup helper URLs to:
+When `serviceUrl` points to localhost, popup helper URLs default to:
 
 - `http://localhost:3100/oauth/callback`
 - `http://localhost:3100/.well-known/oauth-client-metadata.json`
 
-That keeps local app setup simpler.
+## In one sentence
 
-## Package Exports
-
-### `@emcy/agent-sdk`
-
-Core runtime:
-
-- `EmcyAgent`
-- auth helpers
-- core types
-
-### `@emcy/agent-sdk/react`
-
-Web UI:
-
-- `EmcyChat`
-- `EmcyChatProvider`
-- `useEmcyAgent`
-
-### `@emcy/agent-sdk/react-native`
-
-React Native custom-shell entrypoint:
-
-- `useEmcyAgentRuntime`
-- shell helpers re-exported for native use
-
-### `@emcy/agent-sdk/shell`
-
-Framework-agnostic helpers for custom agent shells:
-
-- message grouping
-- tool grouping
-- pending-turn helpers
-- status-label helpers
-- payload formatting helpers
-
-Use this when you want multiple apps to follow the same agent UX patterns without copying logic everywhere.
-
-## In One Sentence
-
-Use `EmcyChat` if you want the fastest integration. Use `react-native` and `shell` if you are building your own premium product-specific assistant.
+Use `react-embed` for the fastest hosted widget, and use `react` or `react-native` when the assistant is part of your product.
 
 ## License
 

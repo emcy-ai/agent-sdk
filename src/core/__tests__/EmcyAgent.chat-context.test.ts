@@ -235,7 +235,7 @@ describe('EmcyAgent chat external user context', () => {
     });
 
     await agent.init();
-    agent.setContext({
+    agent.setAppContext({
       hostRefreshInstruction: 'refresh from updated context',
     });
     await agent.sendMessage('hello');
@@ -300,7 +300,7 @@ describe('EmcyAgent chat external user context', () => {
     });
 
     await agent.init();
-    agent.setClientTools({
+    agent.setHostActions({
       getActiveChecklistContext: {
         description: 'Get the current checklist context.',
         parameters: {},

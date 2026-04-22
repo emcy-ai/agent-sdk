@@ -19,6 +19,7 @@ function createAgentConfig(authConfig: McpServerAuthConfig): AgentConfigResponse
   return {
     agentId: 'agent_test',
     name: 'Auth Agent',
+    conversationResumeVersion: 'resume_v1',
     mcpServers: [
       {
         id: 'server_todo',

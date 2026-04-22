@@ -25,10 +25,15 @@
       "import": "./dist/react-native/index.mjs",
       "require": "./dist/react-native/index.js"
     },
-    "./shell": {
-      "types": "./dist/shell/index.d.ts",
-      "import": "./dist/shell/index.mjs",
-      "require": "./dist/shell/index.js"
+    "./app": {
+      "types": "./dist/app/index.d.ts",
+      "import": "./dist/app/index.mjs",
+      "require": "./dist/app/index.js"
+    },
+    "./react-embed": {
+      "types": "./dist/react-embed/index.d.ts",
+      "import": "./dist/react-embed/index.mjs",
+      "require": "./dist/react-embed/index.js"
     }
   },
   "files": [

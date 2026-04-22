@@ -372,8 +372,8 @@ export class EmcyAgent {
     return (await response.json()) as ConversationFeedback;
   }
 
-  /** Convert client tools to API schema format */
-  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
+  /** Convert host actions to the API schema format. */
+  private hostActionsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
     if (!this.config.clientTools) return [];
     return Object.entries(this.config.clientTools).map(([name, def]) => ({
       name,
@@ -405,19 +405,19 @@ export class EmcyAgent {
     return this.isLoading;
   }
 
-  /** Update the per-turn host context sent with each chat request. */
-  setContext(context: Record<string, unknown> | undefined): void {
+  /** Update the per-turn app context sent with each chat request. */
+  setAppContext(context: Record<string, unknown> | undefined): void {
     this.config = {
       ...this.config,
       context,
     };
   }
 
-  /** Update the client tools exposed to the agent without recreating the session. */
-  setClientTools(clientTools: ClientToolsMap | undefined): void {
+  /** Update the host actions exposed to the agent without recreating the session. */
+  setHostActions(hostActions: ClientToolsMap | undefined): void {
     this.config = {
       ...this.config,
-      clientTools,
+      clientTools: hostActions,
     };
   }
 
@@ -485,6 +485,19 @@ export class EmcyAgent {
     return this.config.oauthClientMetadataUrl ?? DEFAULT_OAUTH_CLIENT_METADATA_URL;
   }
 
+  setOnAuthRequired(
+    onAuthRequired: EmcyAgentConfig['onAuthRequired'],
+  ): void {
+    this.config = {
+      ...this.config,
+      onAuthRequired,
+    };
+  }
+
+  private getPersistentStorage() {
+    return this.config.storage ?? null;
+  }
+
   private async resolveOAuthClientRegistration(
     authConfig: McpServerAuthConfig | null | undefined,
   ): Promise<McpServerAuthConfig | null> {
@@ -497,6 +510,7 @@ export class EmcyAgent {
       oauthClientMetadataUrl: this.config.oauthClientMetadataUrl,
       clientName: 'Emcy MCP Client',
       clientUri: 'https://emcy.ai',
+      storage: this.getPersistentStorage(),
     });
 
     return applyResolvedRegistration(authConfig, registration);
@@ -969,7 +983,7 @@ export class EmcyAgent {
 
       if (currentAuthConfig.registrationEndpoint) {
         const cacheKey = buildRegistrationCacheKey(currentAuthConfig, callbackUrl, 'dcr');
-        const storedRegistration = loadStoredRegistration(cacheKey);
+        const storedRegistration = loadStoredRegistration(cacheKey, this.getPersistentStorage());
         if (storedRegistration?.clientId) {
           candidates.push(applyResolvedRegistration(currentAuthConfig, {
             cacheKey,
@@ -1005,7 +1019,7 @@ export class EmcyAgent {
     return resolved;
   }
 
-  /** Load OAuth token from memory/localStorage using auth-aware cache keying. */
+  /** Load OAuth token from memory/persistent storage using auth-aware cache keying. */
   private loadOAuthToken(mcpServerUrl: string): {
     accessToken: string;
     refreshToken?: string;
@@ -1022,9 +1036,10 @@ export class EmcyAgent {
     }
 
     try {
-      if (typeof localStorage !== 'undefined') {
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
         for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
-          const stored = localStorage.getItem(candidate.storageKey);
+          const stored = storage.getItem(candidate.storageKey);
           if (stored) {
             const data = JSON.parse(stored);
             if (data.accessToken && data.expiresAt) {
@@ -1050,7 +1065,7 @@ export class EmcyAgent {
     return token.expiresAt > Date.now() || !!token.refreshToken;
   }
 
-  /** Store OAuth token to memory and localStorage */
+  /** Store OAuth token to memory and persistent storage */
   private storeOAuthToken(mcpServerUrl: string, tokenResponse: OAuthTokenResponse): void {
     const resolvedAuthConfig =
       tokenResponse.resolvedAuthConfig ?? this.getServerAuthConfig(mcpServerUrl);
@@ -1065,22 +1080,24 @@ export class EmcyAgent {
     this.oauthTokens.set(storageKey, data);
 
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(storageKey, JSON.stringify(data));
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
+        storage.setItem(storageKey, JSON.stringify(data));
       }
     } catch { /* ignore */ }
   }
 
-  /** Clear OAuth token from memory and localStorage */
+  /** Clear OAuth token from memory and persistent storage */
   private clearOAuthToken(mcpServerUrl: string): void {
     for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
       this.oauthTokens.delete(candidate.storageKey);
     }
 
     try {
-      if (typeof localStorage !== 'undefined') {
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
         for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
-          localStorage.removeItem(candidate.storageKey);
+          storage.removeItem(candidate.storageKey);
         }
       }
     } catch { /* ignore */ }
@@ -1212,9 +1229,9 @@ export class EmcyAgent {
     if (externalUser) {
       chatBody.externalUser = externalUser;
     }
-    const clientToolsSchemas = this.clientToolsToSchemas();
-    if (clientToolsSchemas.length > 0) {
-      chatBody.clientTools = clientToolsSchemas;
+    const hostActionSchemas = this.hostActionsToSchemas();
+    if (hostActionSchemas.length > 0) {
+      chatBody.clientTools = hostActionSchemas;
     }
     let response = await this.callChatApi(chatBody, 'chat');
 
@@ -1263,9 +1280,9 @@ export class EmcyAgent {
             durationMs: duration,
             context: this.config.context,
           };
-          const clientToolsSchemas = this.clientToolsToSchemas();
-          if (clientToolsSchemas.length > 0) {
-            toolResultBody.clientTools = clientToolsSchemas;
+          const hostActionSchemas = this.hostActionsToSchemas();
+          if (hostActionSchemas.length > 0) {
+            toolResultBody.clientTools = hostActionSchemas;
           }
           response = await this.callChatApi(toolResultBody, 'chat/tool-result');
         } catch (err) {
@@ -1305,9 +1322,9 @@ export class EmcyAgent {
               durationMs: duration,
               context: this.config.context,
             };
-            const clientToolsSchemas = this.clientToolsToSchemas();
-            if (clientToolsSchemas.length > 0) {
-              toolResultBody.clientTools = clientToolsSchemas;
+            const hostActionSchemas = this.hostActionsToSchemas();
+            if (hostActionSchemas.length > 0) {
+              toolResultBody.clientTools = hostActionSchemas;
             }
             response = await this.callChatApi(toolResultBody, 'chat/tool-result');
           } catch {

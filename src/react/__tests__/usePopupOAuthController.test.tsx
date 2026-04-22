@@ -24,16 +24,13 @@ const AUTH_CONFIG: McpServerAuthConfig = {
   clientId: 'todo-client',
 };
 
-const ControllerHarness = forwardRef<HarnessHandle, { authSessionKey?: string | null }>((props, ref) => {
+const ControllerHarness = forwardRef<HarnessHandle, { appSessionKey?: string | null }>((props, ref) => {
   const controller = usePopupOAuthController({
     resolveServerName: () => 'Todo MCP',
     oauthCallbackUrl: 'http://localhost:3000/oauth/callback',
     oauthClientMetadataUrl: 'http://localhost:3000/.well-known/oauth-client-metadata.json',
-    authSessionKey: props.authSessionKey,
-    embeddedAuth: {
-      hostIdentity: { email: 'alex@todo.local' },
-      mismatchPolicy: 'block_with_switch',
-    },
+    appSessionKey: props.appSessionKey,
+    userIdentity: { email: 'alex@todo.local' },
   });
 
   useImperativeHandle(ref, () => ({
@@ -71,9 +68,9 @@ describe('usePopupOAuthController', () => {
     expect(screen.getByText('idle')).toBeDefined();
   });
 
-  it('cancels an in-flight popup request when the authSessionKey changes', async () => {
+  it('cancels an in-flight popup request when the appSessionKey changes', async () => {
     const ref = React.createRef<HarnessHandle>();
-    const { rerender } = render(<ControllerHarness ref={ref} authSessionKey="session-a" />);
+    const { rerender } = render(<ControllerHarness ref={ref} appSessionKey="session-a" />);
 
     let pendingRequest: Promise<OAuthTokenResponse | undefined> | undefined;
     await act(async () => {
@@ -82,7 +79,7 @@ describe('usePopupOAuthController', () => {
 
     expect(screen.getByText('prompt')).toBeDefined();
 
-    rerender(<ControllerHarness ref={ref} authSessionKey="session-b" />);
+    rerender(<ControllerHarness ref={ref} appSessionKey="session-b" />);
 
     await expect(pendingRequest).resolves.toBeUndefined();
     expect(screen.getByText('idle')).toBeDefined();

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  EmcyEmbeddedAuthConfig,
-  EmcyEmbeddedAuthIdentity,
   McpServerAuthConfig,
   OAuthTokenResponse,
 } from '../core/types';
+import type { AppAgentUserIdentity } from '../app/types';
 import {
   applyResolvedRegistration,
   buildRegistrationCacheKey,
@@ -21,8 +20,8 @@ interface UsePopupOAuthControllerOptions {
   resolveServerName: (serverUrl: string) => string;
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
-  embeddedAuth?: EmcyEmbeddedAuthConfig;
-  authSessionKey?: string | null;
+  userIdentity?: AppAgentUserIdentity;
+  appSessionKey?: string | null;
 }
 
 interface ActivePopupAuthRequest {
@@ -37,7 +36,7 @@ interface ActivePopupAuthRequest {
   handledCallback: boolean;
   popupWindow: Window | null;
   pollTimer?: ReturnType<typeof setInterval>;
-  hostIdentity?: EmcyEmbeddedAuthIdentity;
+  userIdentity?: AppAgentUserIdentity;
   hostIdentityLabel?: string | null;
 }
 
@@ -85,7 +84,7 @@ function normalizeOptionalValue(value?: string): string | undefined {
   return trimmed || undefined;
 }
 
-function formatHostIdentityLabel(identity?: EmcyEmbeddedAuthIdentity): string | null {
+function formatUserIdentityLabel(identity?: AppAgentUserIdentity): string | null {
   if (!identity) {
     return null;
   }
@@ -133,7 +132,7 @@ export function usePopupOAuthController(
   const activeRequestRef = useRef<ActivePopupAuthRequest | null>(null);
   const mountedRef = useRef(true);
   const optionsRef = useRef(options);
-  const authSessionKeyRef = useRef(normalizeAuthSessionKey(options.authSessionKey));
+  const authSessionKeyRef = useRef(normalizeAuthSessionKey(options.appSessionKey));
 
   useEffect(() => {
     optionsRef.current = options;
@@ -192,7 +191,7 @@ export function usePopupOAuthController(
 
   useEffect(() => {
     const previousAuthSessionKey = authSessionKeyRef.current;
-    const nextAuthSessionKey = normalizeAuthSessionKey(options.authSessionKey);
+    const nextAuthSessionKey = normalizeAuthSessionKey(options.appSessionKey);
 
     authSessionKeyRef.current = nextAuthSessionKey;
     if (previousAuthSessionKey === nextAuthSessionKey) {
@@ -220,7 +219,7 @@ export function usePopupOAuthController(
     clearPollTimer,
     clearStoredCallbackPayload,
     closePopupWindow,
-    options.authSessionKey,
+    options.appSessionKey,
   ]);
 
   const resolveAndClearActiveRequest = useCallback((tokenResponse?: OAuthTokenResponse) => {
@@ -525,11 +524,11 @@ export function usePopupOAuthController(
       if (effectiveAuthConfig.resource) {
         params.set('resource', effectiveAuthConfig.resource);
       }
-      if (request.hostIdentity && isGatewayAuthorizeUrl(effectiveAuthConfig)) {
-        const subject = normalizeOptionalValue(request.hostIdentity.subject);
-        const email = normalizeOptionalValue(request.hostIdentity.email);
-        const organizationId = normalizeOptionalValue(request.hostIdentity.organizationId);
-        const displayName = normalizeOptionalValue(request.hostIdentity.displayName);
+      if (request.userIdentity && isGatewayAuthorizeUrl(effectiveAuthConfig)) {
+        const subject = normalizeOptionalValue(request.userIdentity.subject);
+        const email = normalizeOptionalValue(request.userIdentity.email);
+        const organizationId = normalizeOptionalValue(request.userIdentity.organizationId);
+        const displayName = normalizeOptionalValue(request.userIdentity.displayName);
 
         if (subject) {
           params.set('emcy_host_subject', subject);
@@ -545,7 +544,7 @@ export function usePopupOAuthController(
         }
         params.set(
           'emcy_mismatch_policy',
-          optionsRef.current.embeddedAuth?.mismatchPolicy ?? 'block_with_switch',
+          'block_with_switch',
         );
       }
       authUrl = `${loginUrl}${loginUrl.includes('?') ? '&' : '?'}${params.toString()}`;
@@ -700,8 +699,8 @@ export function usePopupOAuthController(
       codeVerifier: '',
       handledCallback: false,
       popupWindow: null,
-      hostIdentity: optionsRef.current.embeddedAuth?.hostIdentity,
-      hostIdentityLabel: formatHostIdentityLabel(optionsRef.current.embeddedAuth?.hostIdentity),
+      userIdentity: optionsRef.current.userIdentity,
+      hostIdentityLabel: formatUserIdentityLabel(optionsRef.current.userIdentity),
     };
 
     activeRequestRef.current = request;

@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import type { EmcyAgentConfig } from '../core/types';
-import { EmcyChatProvider, useEmcyChatContext } from './EmcyChatProvider';
+import React, { useEffect, useRef, useState } from 'react';
+import type { AppAgentConfig } from '../app/types';
+import { AppAgentProvider, useAppAgentContext } from '../react-app';
 import { ChatWindow } from './components/ChatWindow';
-import { WidgetButton } from './components/WidgetButton';
 import { OAuthPopup } from './components/OAuthPopup';
+import { WidgetButton } from './components/WidgetButton';
 
-export interface EmcyChatProps extends EmcyAgentConfig {
+export interface EmcyChatProps extends AppAgentConfig {
   /**
    * Display mode:
-   * - 'floating': Chatbot popup — fixed button in corner, opens as overlay (default)
-   * - 'inline': Full-window embedded — responsive, fills its container. Parent needs defined dimensions.
+   * - 'floating': chat popup with a fixed button (default)
+   * - 'inline': embedded assistant that fills its container
    */
   mode?: 'floating' | 'inline';
   /** Chat window title */
@@ -20,26 +20,10 @@ export interface EmcyChatProps extends EmcyAgentConfig {
   placeholder?: string;
   /** Whether the widget starts open (floating mode only) */
   defaultOpen?: boolean;
-  /** Called when a tool call completes or the agent finishes a turn that included tool calls. Use this to refresh host app data. */
+  /** Called when a tool call completes or a turn settles after tool activity. */
   onToolActivity?: () => void;
 }
 
-/**
- * Drop-in React chat widget. Handles all agent communication internally.
- *
- * @example
- * ```tsx
- * <EmcyChat
- *   apiKey="emcy_sk_xxxx_yyyy"
- *   agentId="ag_xxxxx"
- *   embeddedAuth={{
- *     hostIdentity: { email: session.user.email ?? undefined, subject: session.user.id },
- *     mismatchPolicy: 'block_with_switch',
- *   }}
- *   title="AI Assistant"
- * />
- * ```
- */
 export function EmcyChat({
   mode = 'floating',
   title,
@@ -50,7 +34,7 @@ export function EmcyChat({
   ...agentConfig
 }: EmcyChatProps) {
   return (
-    <EmcyChatProvider {...agentConfig}>
+    <AppAgentProvider {...agentConfig}>
       <EmcyChatInner
         mode={mode}
         title={title}
@@ -58,8 +42,9 @@ export function EmcyChat({
         placeholder={placeholder}
         defaultOpen={defaultOpen}
         onToolActivity={onToolActivity}
+        hasUserIdentity={Boolean(agentConfig.userIdentity)}
       />
-    </EmcyChatProvider>
+    </AppAgentProvider>
   );
 }
 
@@ -70,6 +55,7 @@ interface EmcyChatInnerProps {
   placeholder?: string;
   defaultOpen: boolean;
   onToolActivity?: () => void;
+  hasUserIdentity: boolean;
 }
 
 type AnimState = 'closed' | 'opening' | 'open' | 'closing';
@@ -81,61 +67,55 @@ function EmcyChatInner({
   placeholder,
   defaultOpen,
   onToolActivity,
+  hasUserIdentity,
 }: EmcyChatInnerProps) {
   const [animState, setAnimState] = useState<AnimState>(defaultOpen ? 'open' : 'closed');
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wasLoadingRef = useRef(false);
-  const prevToolCountRef = useRef(0);
+  const prevSettledToolIdsRef = useRef<string[]>([]);
   const {
-    agent,
-    messages,
-    streamingContent,
-    isLoading,
-    isLoadingHistory,
-    isThinking,
-    error,
-    hasOlderMessages,
-    sendMessage,
-    loadOlderMessages,
-    signOutMcpServer,
-    newConversation,
-    mcpServers,
-    agentConfig,
+    runtime,
+    conversation,
+    composer,
+    connections,
     popupAuthState,
-    embeddedHostIdentity,
     startOrRetryPopupAuth,
     cancelPopupAuth,
-  } =
-    useEmcyChatContext();
+  } = useAppAgentContext();
 
-  const widgetConfig = agentConfig?.widgetConfig;
+  const widgetConfig = runtime.agentConfig?.widgetConfig;
   const resolvedTitle = title ?? widgetConfig?.title ?? 'AI Assistant';
   const resolvedWelcome = welcomeMessage ?? widgetConfig?.welcomeMessage;
   const resolvedPlaceholder = placeholder ?? widgetConfig?.placeholder;
-  const mcpAuthButtonLabel = embeddedHostIdentity ? 'Start AI' : 'Needs Auth';
+  const mcpAuthButtonLabel = hasUserIdentity ? 'Start AI' : 'Needs Auth';
 
-  // Cleanup timer on unmount
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+  }, []);
 
-  // Auto-fire onToolActivity when tool calls complete
   useEffect(() => {
-    const toolMessages = messages.filter(m => m.role === 'tool_call');
-    if (wasLoadingRef.current && !isLoading && toolMessages.length > 0) {
+    const settledToolIds = conversation.messages
+      .filter(
+        (message) =>
+          message.role === 'tool_call'
+          && (message.toolCallStatus === 'completed' || message.toolCallStatus === 'error')
+          && Boolean(message.toolCallId),
+      )
+      .map((message) => message.toolCallId as string);
+
+    if (
+      wasLoadingRef.current
+      && !conversation.isLoading
+      && settledToolIds.length > prevSettledToolIdsRef.current.length
+    ) {
       onToolActivity?.();
     }
-    wasLoadingRef.current = isLoading;
-  }, [isLoading, messages, onToolActivity]);
 
-  useEffect(() => {
-    const toolMessages = messages.filter(m => m.role === 'tool_call');
-    if (toolMessages.length > prevToolCountRef.current) {
-      const latest = toolMessages[toolMessages.length - 1];
-      if (latest.toolCallStatus === 'completed' || latest.toolCallStatus === 'error') {
-        onToolActivity?.();
-      }
-    }
-    prevToolCountRef.current = toolMessages.filter(m => m.role === 'tool_call').length;
-  }, [messages, onToolActivity]);
+    wasLoadingRef.current = conversation.isLoading;
+    prevSettledToolIdsRef.current = settledToolIds;
+  }, [conversation.isLoading, conversation.messages, onToolActivity]);
 
   const handleOpen = () => {
     setAnimState('opening');
@@ -148,16 +128,22 @@ function EmcyChatInner({
   };
 
   const handleToggle = () => {
-    if (animState === 'closed') handleOpen();
-    else if (animState === 'open') handleClose();
+    if (animState === 'closed') {
+      handleOpen();
+      return;
+    }
+
+    if (animState === 'open') {
+      handleClose();
+    }
   };
 
-  const handleMcpAuthClick = (serverUrl: string, _serverName: string) => {
-    agent.authenticate(serverUrl).catch(() => {});
+  const handleMcpAuthClick = (serverUrl: string) => {
+    void connections.connect(serverUrl);
   };
 
-  const handleMcpSignOutClick = (serverUrl: string, _serverName: string) => {
-    signOutMcpServer(serverUrl).catch(() => {});
+  const handleMcpSignOutClick = (serverUrl: string) => {
+    void connections.disconnect(serverUrl);
   };
 
   const isOpen = animState === 'open' || animState === 'opening';
@@ -168,73 +154,89 @@ function EmcyChatInner({
       <>
         <ChatWindow
           variant="inline"
-          messages={messages}
-          streamingContent={streamingContent}
-          isLoading={isLoading}
-          isLoadingHistory={isLoadingHistory}
-          isThinking={isThinking}
-          error={error}
-          hasOlderMessages={hasOlderMessages}
+          messages={conversation.messages}
+          streamingContent={conversation.streamingContent}
+          isLoading={conversation.isLoading}
+          isLoadingHistory={conversation.isLoadingHistory}
+          isThinking={conversation.isThinking}
+          error={conversation.error}
+          hasOlderMessages={conversation.hasOlderMessages}
           title={resolvedTitle}
           welcomeMessage={resolvedWelcome}
           placeholder={resolvedPlaceholder}
-          mcpServers={mcpServers}
+          mcpServers={connections.items}
           mcpAuthButtonLabel={mcpAuthButtonLabel}
-          onSend={sendMessage}
-          onLoadOlderMessages={loadOlderMessages}
-          onNewConversation={newConversation}
+          onSend={(message) => {
+            void composer.send(message);
+          }}
+          onLoadOlderMessages={conversation.loadMore}
+          onNewConversation={() => {
+            void conversation.reset();
+          }}
           onMcpAuthClick={handleMcpAuthClick}
           onMcpSignOutClick={handleMcpSignOutClick}
         />
-        {popupAuthState && (
+        {popupAuthState ? (
           <OAuthPopup
             {...popupAuthState}
             onPrimaryAction={startOrRetryPopupAuth}
             onClose={cancelPopupAuth}
           />
-        )}
+        ) : null}
       </>
     );
   }
 
-  // Floating mode with open/close animation
   return (
     <>
-      {isVisible && (
+      {isVisible ? (
         <div
-          className={animState === 'opening' ? 'emcy-fadeInScale' : animState === 'closing' ? 'emcy-fadeOut' : undefined}
+          className={
+            animState === 'opening'
+              ? 'emcy-fadeInScale'
+              : animState === 'closing'
+                ? 'emcy-fadeOut'
+                : undefined
+          }
           style={{ position: 'contents' as never }}
         >
           <ChatWindow
-            messages={messages}
-            streamingContent={streamingContent}
-            isLoading={isLoading}
-            isLoadingHistory={isLoadingHistory}
-            isThinking={isThinking}
-            error={error}
-            hasOlderMessages={hasOlderMessages}
+            messages={conversation.messages}
+            streamingContent={conversation.streamingContent}
+            isLoading={conversation.isLoading}
+            isLoadingHistory={conversation.isLoadingHistory}
+            isThinking={conversation.isThinking}
+            error={conversation.error}
+            hasOlderMessages={conversation.hasOlderMessages}
             title={resolvedTitle}
             welcomeMessage={resolvedWelcome}
             placeholder={resolvedPlaceholder}
-            mcpServers={mcpServers}
+            mcpServers={connections.items}
             mcpAuthButtonLabel={mcpAuthButtonLabel}
-            onSend={sendMessage}
-            onLoadOlderMessages={loadOlderMessages}
+            onSend={(message) => {
+              void composer.send(message);
+            }}
+            onLoadOlderMessages={conversation.loadMore}
             onClose={handleClose}
-            onNewConversation={newConversation}
+            onNewConversation={() => {
+              void conversation.reset();
+            }}
             onMcpAuthClick={handleMcpAuthClick}
             onMcpSignOutClick={handleMcpSignOutClick}
           />
+          {popupAuthState ? (
+            <OAuthPopup
+              {...popupAuthState}
+              onPrimaryAction={startOrRetryPopupAuth}
+              onClose={cancelPopupAuth}
+            />
+          ) : null}
         </div>
-      )}
-      {popupAuthState && (
-        <OAuthPopup
-          {...popupAuthState}
-          onPrimaryAction={startOrRetryPopupAuth}
-          onClose={cancelPopupAuth}
-        />
-      )}
-      <WidgetButton isOpen={isOpen} onClick={handleToggle} />
+      ) : null}
+
+      {mode === 'floating' ? (
+        <WidgetButton isOpen={isOpen} onClick={handleToggle} />
+      ) : null}
     </>
   );
 }

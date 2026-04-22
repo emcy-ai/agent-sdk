@@ -13,7 +13,6 @@ export interface ClientToolDefinition {
   description: string;
   parameters: Record<string, ClientToolParameter>;
   execute: (params: Record<string, unknown>) => Promise<unknown>;
-  requireConfirmation?: boolean;
 }
 
 export type ClientToolsMap = Record<string, ClientToolDefinition>;
@@ -41,6 +40,12 @@ export interface EmcyExternalUserContext {
   displayName?: string;
   avatarUrl?: string;
   organizationId?: string;
+}
+
+export interface EmcyStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 export interface EmcyAgentConfig {
@@ -80,12 +85,6 @@ export interface EmcyAgentConfig {
    * even when the same browser later signs back in as the same user.
    */
   authSessionKey?: string | null;
-
-  /**
-   * @deprecated Use `authSessionKey`.
-   * Older alias for namespacing persisted MCP auth state in browser storage.
-   */
-  authStorageScope?: string | null;
 
   /**
    * Embedded popup auth settings.
@@ -133,6 +132,12 @@ export interface EmcyAgentConfig {
    * The agent can call these to interact with the host app (e.g. fill forms, read page state).
    */
   clientTools?: ClientToolsMap;
+
+  /**
+   * Optional persistent storage override used for MCP auth/session artifacts.
+   * If omitted, the runtime falls back to `localStorage` when available.
+   */
+  storage?: EmcyStorageLike | null;
 }
 
 // ================================================================
@@ -347,6 +352,7 @@ export interface McpServerInfo {
 export interface AgentConfigResponse {
   agentId: string;
   name: string;
+  conversationResumeVersion: string;
   /** @deprecated Use mcpServers instead */
   mcpServerUrl?: string;
   mcpServers: McpServerInfo[];
