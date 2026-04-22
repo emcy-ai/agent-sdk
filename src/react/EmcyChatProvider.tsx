@@ -46,10 +46,12 @@ export interface EmcyChatContextValue {
   conversationId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;
+  isLoadingHistory: boolean;
   isThinking: boolean;
   error: SseError | null;
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
+  hasOlderMessages: boolean;
   embeddedHostIdentity: EmcyEmbeddedAuthIdentity | null;
   oauthCallbackUrl: string;
   oauthClientMetadataUrl: string;
@@ -57,6 +59,8 @@ export interface EmcyChatContextValue {
   startOrRetryPopupAuth: () => void;
   cancelPopupAuth: () => void;
   sendMessage: (message: string) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
+  submitFeedback: (sentiment: 'up' | 'down', comment?: string) => Promise<void>;
   authenticateMcpServer: (mcpServerUrl: string) => Promise<boolean>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
@@ -80,12 +84,14 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const popupAuthRequestRef = useRef<OnAuthRequiredFn>(async () => undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<SseError | null>(null);
   const [agentConfig, setAgentConfig] = useState<AgentConfigResponse | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const shouldUseBuiltInPopupAuth = !config.onAuthRequired;
   const authSessionKey = resolveExplicitAuthSessionKey(config);
   const authSessionKeyRef = useRef(authSessionKey);
@@ -120,12 +126,14 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
   const resetAgentState = useCallback(() => {
     setMessages([]);
     setIsLoading(false);
+    setIsLoadingHistory(false);
     setIsThinking(false);
     setError(null);
     setAgentConfig(null);
     setStreamingContent('');
     setMcpServers([]);
     setConversationId(null);
+    setHasOlderMessages(false);
   }, []);
 
   const resolveServerName = useCallback((serverUrl: string) => {
@@ -180,6 +188,7 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
       setMessages((prev) => [...prev, msg]);
       setStreamingContent('');
       setConversationId(agent.getConversationId());
+      setHasOlderMessages(agent.getHasOlderMessages());
     };
 
     const onContentDelta = (delta: SseContentDelta) => {
@@ -277,6 +286,8 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
       setAgentConfig(initConfig);
       setMcpServers(agent.getMcpServers());
       setConversationId(agent.getConversationId());
+      setMessages(agent.getMessages());
+      setHasOlderMessages(agent.getHasOlderMessages());
     }).catch((err) => {
       if (!isCurrent) {
         return;
@@ -305,8 +316,70 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     agent.setClientTools(config.clientTools);
   }, [agent, config.clientTools, config.context]);
 
+  useEffect(() => {
+    if (!config.initialConversationId || !agentConfig) {
+      return;
+    }
+
+    if (agent.getConversationId() === config.initialConversationId && agent.getMessages().length > 0) {
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoadingHistory(true);
+    agent.loadConversation(config.initialConversationId).then(() => {
+      if (!isCurrent) {
+        return;
+      }
+
+      setMessages(agent.getMessages());
+      setConversationId(agent.getConversationId());
+      setHasOlderMessages(agent.getHasOlderMessages());
+    }).catch((err) => {
+      if (!isCurrent) {
+        return;
+      }
+
+      setError({
+        code: 'conversation_history_error',
+        message: err instanceof Error ? err.message : 'Failed to load conversation history.',
+      });
+    }).finally(() => {
+      if (isCurrent) {
+        setIsLoadingHistory(false);
+      }
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [agent, agentConfig, config.initialConversationId]);
+
   const sendMessage = async (message: string) => {
     await agent.sendMessage(message);
+  };
+
+  const loadOlderMessages = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const page = await agent.loadOlderMessages();
+      if (!page) {
+        return;
+      }
+
+      setMessages(agent.getMessages());
+      setHasOlderMessages(agent.getHasOlderMessages());
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const submitFeedback = async (sentiment: 'up' | 'down', comment?: string) => {
+    await agent.submitFeedback({
+      sentiment,
+      comment,
+      source: 'react-sdk',
+    });
   };
 
   const signOutMcpServer = async (mcpServerUrl: string) => {
@@ -330,6 +403,8 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
     setStreamingContent('');
     setError(null);
     setIsThinking(false);
+    setIsLoadingHistory(false);
+    setHasOlderMessages(false);
   };
 
   return (
@@ -339,10 +414,12 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
         conversationId,
         messages,
         isLoading,
+        isLoadingHistory,
         isThinking,
         error,
         agentConfig,
         mcpServers,
+        hasOlderMessages,
         embeddedHostIdentity: config.embeddedAuth?.hostIdentity ?? null,
         oauthCallbackUrl: agent.getOAuthCallbackUrl(),
         oauthClientMetadataUrl: agent.getOAuthClientMetadataUrl(),
@@ -352,6 +429,8 @@ export function EmcyChatProvider({ children, ...config }: EmcyChatProviderProps)
           : () => {},
         cancelPopupAuth: shouldUseBuiltInPopupAuth ? cancelPopupAuth : () => {},
         sendMessage,
+        loadOlderMessages,
+        submitFeedback,
         authenticateMcpServer,
         signOutMcpServer,
         cancel,

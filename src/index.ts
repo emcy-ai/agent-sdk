@@ -25,6 +25,10 @@ export type {
   EmcyEmbeddedAuthConfig,
   EmcyEmbeddedAuthIdentity,
   ChatMessage,
+  ConversationFeedback,
+  ConversationFeedbackSentiment,
+  ConversationMessagesPage,
+  ConversationReplayMessage,
   AgentConfigResponse,
   McpServerInfo,
   McpServerAuthConfig,
@@ -37,6 +41,7 @@ export type {
   SseToolCall,
   SseMessageEnd,
   SseError,
+  SubmitConversationFeedbackRequest,
 } from './core/types';
 export type {
   AgentAssistantMessage,

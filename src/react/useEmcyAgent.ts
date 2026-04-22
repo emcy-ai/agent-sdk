@@ -33,11 +33,15 @@ export interface UseEmcyAgentReturn {
   messages: ChatMessage[];
   isReady: boolean;
   isLoading: boolean;
+  isLoadingHistory: boolean;
   isThinking: boolean;
   error: SseError | null;
   agentConfig: AgentConfigResponse | null;
   mcpServers: McpServerStatus[];
+  hasOlderMessages: boolean;
   sendMessage: (message: string) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
+  submitFeedback: (sentiment: 'up' | 'down', comment?: string) => Promise<void>;
   authenticateMcpServer: (mcpServerUrl: string) => Promise<boolean>;
   signOutMcpServer: (mcpServerUrl: string) => Promise<void>;
   cancel: () => void;
@@ -62,6 +66,7 @@ export function useEmcyAgent(
   const enabled = options?.enabled ?? true;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<SseError | null>(null);
   const [agentConfigError, setAgentConfigError] = useState<SseError | null>(null);
@@ -69,6 +74,7 @@ export function useEmcyAgent(
   const [streamingContent, setStreamingContent] = useState('');
   const [mcpServers, setMcpServers] = useState<McpServerStatus[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const authSessionKey = resolveExplicitAuthSessionKey(config);
   const authSessionKeyRef = useRef(authSessionKey);
 
@@ -96,8 +102,10 @@ export function useEmcyAgent(
     setAgentConfigError(null);
     setIsThinking(false);
     setIsLoading(false);
+    setIsLoadingHistory(false);
     setAgentConfig(null);
     setMcpServers([]);
+    setHasOlderMessages(false);
     setAgent(new EmcyAgent(latestConfigRef.current));
   }, [authSessionKey]);
 
@@ -110,8 +118,10 @@ export function useEmcyAgent(
       setAgentConfigError(null);
       setIsThinking(false);
       setIsLoading(false);
+      setIsLoadingHistory(false);
       setAgentConfig(null);
       setMcpServers([]);
+      setHasOlderMessages(false);
       return;
     }
 
@@ -121,6 +131,7 @@ export function useEmcyAgent(
       setMessages((prev) => [...prev, msg]);
       setStreamingContent('');
       setConversationId(agent.getConversationId());
+      setHasOlderMessages(agent.getHasOlderMessages());
     };
 
     const onContentDelta = (delta: SseContentDelta) => {
@@ -218,6 +229,8 @@ export function useEmcyAgent(
       setAgentConfigError(null);
       setMcpServers(agent.getMcpServers());
       setConversationId(agent.getConversationId());
+      setMessages(agent.getMessages());
+      setHasOlderMessages(agent.getHasOlderMessages());
     }).catch((err) => {
       if (!isCurrent) {
         return;
@@ -248,8 +261,70 @@ export function useEmcyAgent(
     agent.setClientTools(config.clientTools);
   }, [agent, config.clientTools, config.context]);
 
+  useEffect(() => {
+    if (!enabled || !config.initialConversationId || !agentConfig) {
+      return;
+    }
+
+    if (agent.getConversationId() === config.initialConversationId && agent.getMessages().length > 0) {
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoadingHistory(true);
+    agent.loadConversation(config.initialConversationId).then(() => {
+      if (!isCurrent) {
+        return;
+      }
+
+      setMessages(agent.getMessages());
+      setConversationId(agent.getConversationId());
+      setHasOlderMessages(agent.getHasOlderMessages());
+    }).catch((err) => {
+      if (!isCurrent) {
+        return;
+      }
+
+      setError({
+        code: 'conversation_history_error',
+        message: err instanceof Error ? err.message : 'Failed to load conversation history.',
+      });
+    }).finally(() => {
+      if (isCurrent) {
+        setIsLoadingHistory(false);
+      }
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [agent, agentConfig, config.initialConversationId, enabled]);
+
   const sendMessage = async (message: string) => {
     await agent.sendMessage(message);
+  };
+
+  const loadOlderMessages = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const page = await agent.loadOlderMessages();
+      if (!page) {
+        return;
+      }
+
+      setMessages(agent.getMessages());
+      setHasOlderMessages(agent.getHasOlderMessages());
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const submitFeedback = async (sentiment: 'up' | 'down', comment?: string) => {
+    await agent.submitFeedback({
+      sentiment,
+      comment,
+      source: 'react-sdk',
+    });
   };
 
   const signOutMcpServer = async (mcpServerUrl: string) => {
@@ -273,6 +348,8 @@ export function useEmcyAgent(
     setStreamingContent('');
     setError(null);
     setIsThinking(false);
+    setIsLoadingHistory(false);
+    setHasOlderMessages(false);
   };
 
   return {
@@ -281,11 +358,15 @@ export function useEmcyAgent(
     messages,
     isReady: enabled && agentConfig !== null && agentConfigError === null,
     isLoading,
+    isLoadingHistory,
     isThinking,
     error,
     agentConfig,
     mcpServers,
+    hasOlderMessages,
     sendMessage,
+    loadOlderMessages,
+    submitFeedback,
     authenticateMcpServer,
     signOutMcpServer,
     cancel,

@@ -13,14 +13,17 @@ export interface ChatWindowProps {
   messages: ChatMessage[];
   streamingContent: string;
   isLoading: boolean;
+  isLoadingHistory?: boolean;
   isThinking?: boolean;
   error: SseError | null;
+  hasOlderMessages?: boolean;
   title?: string;
   welcomeMessage?: string;
   placeholder?: string;
   mcpServers?: McpServerStatus[];
   mcpAuthButtonLabel?: string;
   onSend: (message: string) => void;
+  onLoadOlderMessages?: () => void | Promise<void>;
   onClose?: () => void;
   onNewConversation?: () => void;
   onMcpAuthClick?: (serverUrl: string, serverName: string) => void;
@@ -33,14 +36,17 @@ export function ChatWindow({
   messages,
   streamingContent,
   isLoading,
+  isLoadingHistory,
   isThinking,
   error,
+  hasOlderMessages,
   title = 'AI Assistant',
   welcomeMessage,
   placeholder,
   mcpServers,
   mcpAuthButtonLabel,
   onSend,
+  onLoadOlderMessages,
   onClose,
   onNewConversation,
   onMcpAuthClick,
@@ -98,6 +104,9 @@ export function ChatWindow({
         welcomeMessage={welcomeMessage}
         isThinking={isThinking}
         blockingError={blockingError}
+        hasOlderMessages={hasOlderMessages}
+        isLoadingHistory={isLoadingHistory}
+        onLoadOlderMessages={onLoadOlderMessages}
       />
 
       {/* Error banner */}

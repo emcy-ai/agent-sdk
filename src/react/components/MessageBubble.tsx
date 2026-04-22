@@ -40,6 +40,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     case 'tool_result':
       return null;
 
+    case 'error':
+      return (
+        <div
+          className="emcy-fadeInUp"
+          style={{
+            ...styles.errorCard,
+            marginTop: 8,
+            marginBottom: 8,
+          }}
+        >
+          {message.content}
+        </div>
+      );
+
     default:
       return null;
   }

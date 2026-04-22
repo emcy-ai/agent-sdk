@@ -91,9 +91,12 @@ function EmcyChatInner({
     messages,
     streamingContent,
     isLoading,
+    isLoadingHistory,
     isThinking,
     error,
+    hasOlderMessages,
     sendMessage,
+    loadOlderMessages,
     signOutMcpServer,
     newConversation,
     mcpServers,
@@ -168,14 +171,17 @@ function EmcyChatInner({
           messages={messages}
           streamingContent={streamingContent}
           isLoading={isLoading}
+          isLoadingHistory={isLoadingHistory}
           isThinking={isThinking}
           error={error}
+          hasOlderMessages={hasOlderMessages}
           title={resolvedTitle}
           welcomeMessage={resolvedWelcome}
           placeholder={resolvedPlaceholder}
           mcpServers={mcpServers}
           mcpAuthButtonLabel={mcpAuthButtonLabel}
           onSend={sendMessage}
+          onLoadOlderMessages={loadOlderMessages}
           onNewConversation={newConversation}
           onMcpAuthClick={handleMcpAuthClick}
           onMcpSignOutClick={handleMcpSignOutClick}
@@ -203,14 +209,17 @@ function EmcyChatInner({
             messages={messages}
             streamingContent={streamingContent}
             isLoading={isLoading}
+            isLoadingHistory={isLoadingHistory}
             isThinking={isThinking}
             error={error}
+            hasOlderMessages={hasOlderMessages}
             title={resolvedTitle}
             welcomeMessage={resolvedWelcome}
             placeholder={resolvedPlaceholder}
             mcpServers={mcpServers}
             mcpAuthButtonLabel={mcpAuthButtonLabel}
             onSend={sendMessage}
+            onLoadOlderMessages={loadOlderMessages}
             onClose={handleClose}
             onNewConversation={newConversation}
             onMcpAuthClick={handleMcpAuthClick}

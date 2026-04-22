@@ -12,6 +12,9 @@ export interface MessageListProps {
   welcomeMessage?: string;
   isThinking?: boolean;
   blockingError?: SseError | null;
+  hasOlderMessages?: boolean;
+  isLoadingHistory?: boolean;
+  onLoadOlderMessages?: () => void | Promise<void>;
 }
 
 const BOTTOM_THRESHOLD = 40;
@@ -22,6 +25,9 @@ export function MessageList({
   welcomeMessage,
   isThinking,
   blockingError,
+  hasOlderMessages,
+  isLoadingHistory,
+  onLoadOlderMessages,
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -114,6 +120,28 @@ export function MessageList({
   return (
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div ref={listRef} style={styles.messageList} onScroll={handleScroll}>
+        {hasOlderMessages && onLoadOlderMessages ? (
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={() => { void onLoadOlderMessages(); }}
+              disabled={Boolean(isLoadingHistory)}
+              style={{
+                border: `1px solid ${styles.colors.border}`,
+                background: styles.colors.bgSecondary,
+                color: styles.colors.textSecondary,
+                borderRadius: 999,
+                padding: '6px 12px',
+                fontSize: 12,
+                cursor: isLoadingHistory ? 'default' : 'pointer',
+                opacity: isLoadingHistory ? 0.7 : 1,
+              }}
+            >
+              {isLoadingHistory ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          </div>
+        ) : null}
+
         {visibleMessages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
         ))}
