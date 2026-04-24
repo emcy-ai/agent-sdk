@@ -93,7 +93,7 @@ export function CustomAssistant() {
       email: session.user.email,
       organizationId: session.organizationId,
     },
-    hostActions,
+    clientTools,
     appContext,
   });
 
@@ -116,7 +116,7 @@ export function AssistantShell() {
       email: session.user.email,
       organizationId: session.organizationId,
     },
-    hostActions,
+    clientTools,
     appContext,
     platform,
   });
@@ -169,7 +169,7 @@ userIdentity: {
 }
 ```
 
-### `hostActions`
+### `clientTools`
 
 App-owned functions the agent can call locally for UI work or host orchestration.
 

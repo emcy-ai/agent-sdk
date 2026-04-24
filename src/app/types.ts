@@ -1,7 +1,7 @@
 import type {
   AgentConfigResponse,
   ChatMessage,
-  ClientToolsMap,
+  ClientToolsMap as RuntimeClientToolsMap,
   ConversationFeedback,
   ConversationFeedbackSentiment,
   EmcyEmbeddedAuthIdentity,
@@ -11,7 +11,7 @@ import type {
   SseError,
 } from '../core/types';
 
-export type HostActionsMap = ClientToolsMap;
+export type ClientToolsMap = RuntimeClientToolsMap;
 export type AppAgentUserIdentity = EmcyEmbeddedAuthIdentity;
 
 export interface KeyValueStore {
@@ -120,7 +120,7 @@ export interface AppAgentConfig {
   useCookies?: boolean;
   externalUserId?: string;
   appContext?: Record<string, unknown>;
-  hostActions?: HostActionsMap;
+  clientTools?: ClientToolsMap;
   platform?: AppAgentPlatform;
   onAuthRequired?: (mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse | undefined>;
   conversation?: {

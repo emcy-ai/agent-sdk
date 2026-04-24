@@ -372,8 +372,8 @@ export class EmcyAgent {
     return (await response.json()) as ConversationFeedback;
   }
 
-  /** Convert host actions to the API schema format. */
-  private hostActionsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
+  /** Convert client tools to the API schema format. */
+  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
     if (!this.config.clientTools) return [];
     return Object.entries(this.config.clientTools).map(([name, def]) => ({
       name,
@@ -413,11 +413,11 @@ export class EmcyAgent {
     };
   }
 
-  /** Update the host actions exposed to the agent without recreating the session. */
-  setHostActions(hostActions: ClientToolsMap | undefined): void {
+  /** Update the client tools exposed to the agent without recreating the session. */
+  setClientTools(clientTools: ClientToolsMap | undefined): void {
     this.config = {
       ...this.config,
-      clientTools: hostActions,
+      clientTools,
     };
   }
 
@@ -1229,9 +1229,9 @@ export class EmcyAgent {
     if (externalUser) {
       chatBody.externalUser = externalUser;
     }
-    const hostActionSchemas = this.hostActionsToSchemas();
-    if (hostActionSchemas.length > 0) {
-      chatBody.clientTools = hostActionSchemas;
+    const clientToolSchemas = this.clientToolsToSchemas();
+    if (clientToolSchemas.length > 0) {
+      chatBody.clientTools = clientToolSchemas;
     }
     let response = await this.callChatApi(chatBody, 'chat');
 
@@ -1280,9 +1280,9 @@ export class EmcyAgent {
             durationMs: duration,
             context: this.config.context,
           };
-          const hostActionSchemas = this.hostActionsToSchemas();
-          if (hostActionSchemas.length > 0) {
-            toolResultBody.clientTools = hostActionSchemas;
+          const clientToolSchemas = this.clientToolsToSchemas();
+          if (clientToolSchemas.length > 0) {
+            toolResultBody.clientTools = clientToolSchemas;
           }
           response = await this.callChatApi(toolResultBody, 'chat/tool-result');
         } catch (err) {
@@ -1322,9 +1322,9 @@ export class EmcyAgent {
               durationMs: duration,
               context: this.config.context,
             };
-            const hostActionSchemas = this.hostActionsToSchemas();
-            if (hostActionSchemas.length > 0) {
-              toolResultBody.clientTools = hostActionSchemas;
+            const clientToolSchemas = this.clientToolsToSchemas();
+            if (clientToolSchemas.length > 0) {
+              toolResultBody.clientTools = clientToolSchemas;
             }
             response = await this.callChatApi(toolResultBody, 'chat/tool-result');
           } catch {

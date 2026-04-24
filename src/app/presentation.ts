@@ -299,7 +299,7 @@ export function deriveLastTurnSummary(messages: ChatMessage[]): AppAgentLastTurn
 export function deriveInlineFeedState(options: {
   pendingTurn: AppAgentInlinePendingTurnState | null;
   toolMessages: AppAgentToolCallMessage[];
-  latestAssistantContent?: string | null;
+  latestAssistantMessage?: { id: string; content: string } | null;
   streamingContent?: string;
   isLoading: boolean;
   isThinking: boolean;
@@ -308,7 +308,7 @@ export function deriveInlineFeedState(options: {
   const {
     pendingTurn,
     toolMessages,
-    latestAssistantContent,
+    latestAssistantMessage,
     streamingContent = '',
     isLoading,
     isThinking,
@@ -323,8 +323,17 @@ export function deriveInlineFeedState(options: {
     : Math.max(toolMessages.length - maxRecentTools, 0);
 
   const recentTools = toolMessages.slice(startIndex);
+  // While a new turn is in flight, only surface an assistant message if it is
+  // genuinely new — i.e. its id is different from the one captured when the
+  // turn started. Otherwise we'd flash the stale previous reply under a
+  // "Latest reply" label until streaming begins.
+  const hasFreshAssistantReply = Boolean(
+    latestAssistantMessage
+      && (!pendingTurn || latestAssistantMessage.id !== pendingTurn.baselineAssistantId),
+  );
   const previewText =
-    streamingContent || (pendingTurn ? latestAssistantContent ?? null : null);
+    streamingContent
+    || (hasFreshAssistantReply ? latestAssistantMessage!.content : null);
   const waitingForActivity =
     Boolean(pendingTurn) &&
     recentTools.length === 0 &&

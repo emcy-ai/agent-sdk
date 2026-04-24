@@ -221,7 +221,7 @@ export class AppAgentController {
       onAuthRequired,
       externalUserId: config.externalUserId ?? config.userIdentity?.subject,
       context: config.appContext,
-      clientTools: this.buildHostActions(config.hostActions),
+      clientTools: this.buildClientTools(config.clientTools),
       conversationHistoryPageSize: config.conversation?.historyPageSize ?? 50,
       storage: config.storage,
     });
@@ -289,7 +289,9 @@ export class AppAgentController {
     const inlineFeed = deriveInlineFeedState({
       pendingTurn: this.state.conversation.pendingTurn,
       toolMessages,
-      latestAssistantContent: latestAssistantMessage?.content ?? null,
+      latestAssistantMessage: latestAssistantMessage
+        ? { id: latestAssistantMessage.id, content: latestAssistantMessage.content }
+        : null,
       streamingContent: this.state.conversation.streamingContent,
       isLoading: this.state.conversation.isLoading,
       isThinking: this.state.conversation.isThinking,
@@ -369,13 +371,13 @@ export class AppAgentController {
     this.listeners.clear();
   }
 
-  updateDynamicConfig(config: Pick<AppAgentConfig, 'appContext' | 'hostActions' | 'feedbackSource'>): void {
+  updateDynamicConfig(config: Pick<AppAgentConfig, 'appContext' | 'clientTools' | 'feedbackSource'>): void {
     this.config = {
       ...this.config,
       ...config,
     };
     this.agent.setAppContext(this.config.appContext);
-    this.agent.setHostActions(this.buildHostActions(this.config.hostActions));
+    this.agent.setClientTools(this.buildClientTools(this.config.clientTools));
   }
 
   setAuthRequiredHandler(
@@ -936,7 +938,7 @@ export class AppAgentController {
     }
   }
 
-  private buildHostActions(hostActions: AppAgentConfig['hostActions']) {
+  private buildClientTools(clientTools: AppAgentConfig['clientTools']) {
     const approvalAction = {
       description: 'Ask the host app to approve a multi-step plan before you continue.',
       parameters: {
@@ -970,10 +972,10 @@ export class AppAgentController {
           this.approvalResolvers.set(approvalId, { resolve });
         });
       },
-    } satisfies NonNullable<AppAgentConfig['hostActions']>[string];
+    } satisfies NonNullable<AppAgentConfig['clientTools']>[string];
 
     return {
-      ...(hostActions ?? {}),
+      ...(clientTools ?? {}),
       [APP_AGENT_APPROVAL_ACTION]: {
         ...approvalAction,
       },
