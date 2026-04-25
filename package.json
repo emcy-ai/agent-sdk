@@ -1,6 +1,6 @@
 {
   "name": "@emcy/agent-sdk",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -19,6 +19,21 @@
       "types": "./dist/react/index.d.ts",
       "import": "./dist/react/index.mjs",
       "require": "./dist/react/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.mjs",
+      "require": "./dist/react-native/index.js"
+    },
+    "./app": {
+      "types": "./dist/app/index.d.ts",
+      "import": "./dist/app/index.mjs",
+      "require": "./dist/app/index.js"
+    },
+    "./react-embed": {
+      "types": "./dist/react-embed/index.d.ts",
+      "import": "./dist/react-embed/index.mjs",
+      "require": "./dist/react-embed/index.js"
     }
   },
   "files": [

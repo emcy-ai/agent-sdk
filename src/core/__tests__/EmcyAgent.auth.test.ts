@@ -3,6 +3,7 @@ import { EmcyAgent } from '../EmcyAgent';
 import {
   applyResolvedRegistration,
   buildRegistrationCacheKey,
+  getEffectiveCallbackUrl,
   loadStoredRegistration,
   saveStoredRegistration,
 } from '../auth/registration';
@@ -18,6 +19,7 @@ function createAgentConfig(authConfig: McpServerAuthConfig): AgentConfigResponse
   return {
     agentId: 'agent_test',
     name: 'Auth Agent',
+    conversationResumeVersion: 'resume_v1',
     mcpServers: [
       {
         id: 'server_todo',
@@ -255,6 +257,16 @@ describe('EmcyAgent auth behavior', () => {
     expect(agent.getOAuthClientMetadataUrl()).toBe(
       'http://localhost:3100/.well-known/oauth-client-metadata.json',
     );
+  });
+
+  it('prefers an explicit native callback over a loopback auth config callback', () => {
+    expect(getEffectiveCallbackUrl(
+      {
+        authType: 'oauth2',
+        callbackUrl: 'http://localhost:5150/api/v1/gateway/gw_todo-local/oauth/callback',
+      },
+      'checklistsquad://oauth/callback',
+    )).toBe('checklistsquad://oauth/callback');
   });
 
   it('surfaces the backend error message when agent config auth fails', async () => {

@@ -1,48 +1,132 @@
 # @emcy/agent-sdk
 
-Embeddable AI chat widget powered by MCP.
+Use Emcy agents in your app.
 
-The SDK is designed so embedded apps do not need to host OAuth callback routes, client metadata routes, or manage MCP tokens directly. Emcy owns the popup OAuth helper surface and brokers downstream grants server-side.
+This package now has one public model for custom product integrations: `App Agent`.
 
-## Installation
+## Install
 
 ```bash
 npm install @emcy/agent-sdk
 ```
 
-## Quick Start
+## Package surfaces
 
-### React
+### `@emcy/agent-sdk`
+
+Low-level runtime:
+
+- `EmcyAgent`
+- core auth helpers
+- core transport and types
+
+### `@emcy/agent-sdk/app`
+
+Framework-agnostic agent experience helpers:
+
+- `createAppAgent`
+- `AppAgentController`
+- message / tool derivation helpers
+- resume / pending-turn / formatting helpers
+
+### `@emcy/agent-sdk/react`
+
+React app integration:
+
+- `useAppAgent`
+- `AppAgentProvider`
+- `useAppAgentContext`
+
+### `@emcy/agent-sdk/react-native`
+
+React Native app integration:
+
+- `useAppAgent`
+- `AppAgentProvider`
+- `useAppAgentContext`
+
+### `@emcy/agent-sdk/react-embed`
+
+Drop-in web widget:
+
+- `EmcyChat`
+
+## Start here
+
+### 1. Drop-in web embed
 
 ```tsx
-import { EmcyChat } from "@emcy/agent-sdk/react";
+import { EmcyChat } from "@emcy/agent-sdk/react-embed";
 
-function App() {
+export function App() {
   return (
     <div style={{ height: 640 }}>
       <EmcyChat
         apiKey="emcy_sk_xxxx"
         agentId="ag_xxxxx"
-        authSessionKey={currentSession.id}
-        mode="inline"
-        title="AI Assistant"
-        embeddedAuth={{
-          hostIdentity: {
-            subject: currentUser.id,
-            email: currentUser.email,
-            organizationId: currentUser.organizationId,
-            displayName: currentUser.name,
-            avatarUrl: currentUser.avatarUrl,
-          },
-          mismatchPolicy: "block_with_switch",
+        appSessionKey={session.id}
+        userIdentity={{
+          subject: session.user.id,
+          email: session.user.email,
+          organizationId: session.organizationId,
         }}
+        mode="inline"
+        title="Support Agent"
       />
     </div>
   );
 }
 ```
 
-### Vanilla JS / TypeScript
+### 2. Custom React app UI
+
+```tsx
+import { useAppAgent } from "@emcy/agent-sdk/react";
+
+export function CustomAssistant() {
+  const agent = useAppAgent({
+    apiKey: "emcy_sk_xxxx",
+    agentId: "ag_xxxxx",
+    appSessionKey: session.id,
+    userIdentity: {
+      subject: session.user.id,
+      email: session.user.email,
+      organizationId: session.organizationId,
+    },
+    clientTools,
+    appContext,
+  });
+
+  return null;
+}
+```
+
+### 3. Custom React Native UI
+
+```tsx
+import { useAppAgent } from "@emcy/agent-sdk/react-native";
+
+export function AssistantShell() {
+  const agent = useAppAgent({
+    apiKey: "emcy_sk_xxxx",
+    agentId: "ag_xxxxx",
+    appSessionKey: session.id,
+    userIdentity: {
+      subject: session.user.id,
+      email: session.user.email,
+      organizationId: session.organizationId,
+    },
+    clientTools,
+    appContext,
+    platform,
+  });
+
+  const toolMessages = agent.conversation.toolMessages;
+  return null;
+}
+```
+
+### 4. Raw runtime
 
 ```ts
 import { EmcyAgent } from "@emcy/agent-sdk";
@@ -50,109 +134,67 @@ import { EmcyAgent } from "@emcy/agent-sdk";
 const agent = new EmcyAgent({
   apiKey: "emcy_sk_xxxx",
   agentId: "ag_xxxxx",
-  authSessionKey: currentSession.id,
-  embeddedAuth: {
-    hostIdentity: {
-      subject: currentUser.id,
-      email: currentUser.email,
-    },
-    mismatchPolicy: "block_with_switch",
-  },
+  authSessionKey: session.id,
 });
 
 await agent.init();
+await agent.sendMessage("Hello");
 ```
 
-## Configuration
+## Core app-agent config
 
-| Option | Type | Description |
-| ------ | ---- | ----------- |
-| `apiKey` | `string` | Emcy API key |
-| `agentId` | `string` | Agent or agent ID |
-| `agentServiceUrl` | `string` | Emcy API URL. Defaults to `https://api.emcy.ai`. |
-| `oauthCallbackUrl` | `string` | Override Emcy's popup callback URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/oauth/callback` when running locally. |
-| `oauthClientMetadataUrl` | `string` | Override Emcy's popup client metadata URL. Defaults to Emcy's hosted helper route, or `http://localhost:3100/.well-known/oauth-client-metadata.json` when running locally. |
-| `authSessionKey` | `string \| null` | Host app auth-session boundary for persisted MCP auth. Pass your current session id so logout forces reconnect, even for the same user. |
-| `embeddedAuth` | `EmcyEmbeddedAuthConfig` | Host-account hints for embedded popup auth. This is how the host app tells Emcy who the current user is without passing tokens. |
-| `onAuthRequired` | `(mcpServerUrl: string, authConfig: McpServerAuthConfig) => Promise<OAuthTokenResponse \| undefined>` | Advanced override for the built-in popup auth flow. |
-| `useCookies` | `boolean` | Send cookies with MCP requests. Defaults to `false`. |
-| `externalUserId` | `string` | Optional user identifier for conversations. |
-| `context` | `Record<string, unknown>` | Extra context sent with each message. |
+### `apiKey`
 
-When present, `externalUserId` and `embeddedAuth.hostIdentity` are combined into a typed `externalUser` payload on chat requests so Emcy agents can attribute usage and budgets per embedded end user.
+Your Emcy API key.
 
-## Embedded Auth
+### `agentId`
 
-Embedded MCP auth is popup-only.
+The agent to run.
 
-The recommended flow is:
+### `appSessionKey`
 
-1. your app passes the current host identity through `embeddedAuth`
-2. the widget shows `Start AI` / `Start AI with your account`
-3. Emcy attempts same-account popup auth first
-4. if a downstream session already exists for that user, the popup can complete immediately
-5. if interactive login is needed, the popup stays on Emcy-owned helper routes and downstream provider pages
-6. if the downstream provider resolves a different user, Emcy blocks the mismatch and asks the user to confirm switching accounts
+Your host app’s current signed-in session boundary.
 
-Important behavior:
+Pass this so persisted MCP auth and resumed conversations do not leak across logout/login cycles.
 
-- the host app does not receive MCP access tokens
-- consumer apps do not need to host OAuth callback routes
-- consumer apps do not need to host OAuth client metadata routes
-- the popup flow survives normal React rerenders
-- the embedded flow can use the same downstream OAuth structure as the Emcy agent product
+### `userIdentity`
 
-### `embeddedAuth`
+The signed-in host user:
 
 ```ts
-type EmcyEmbeddedAuthIdentity = {
-  subject?: string;
-  email?: string;
-  organizationId?: string;
-  displayName?: string;
-  avatarUrl?: string;
-};
-
-type EmcyEmbeddedAuthConfig = {
-  hostIdentity?: EmcyEmbeddedAuthIdentity;
-  mismatchPolicy: "block_with_switch";
-};
+userIdentity: {
+  subject: session.user.id,
+  email: session.user.email,
+  organizationId: session.organizationId,
+}
 ```
 
-Use `subject` when you have a stable app-specific user id. If not, `email` is the next best hint. If both the host app and downstream provider expose organization ids, include `organizationId` so Emcy can reject cross-org mismatches.
+### `clientTools`
 
-## Logout Cleanup
+App-owned functions the agent can call locally for UI work or host orchestration.
 
-When your app signs the host user out, clear persisted MCP auth state too:
+### `appContext`
 
-```ts
-import { clearPersistedMcpAuth } from "@emcy/agent-sdk";
+Extra host context or policy instructions for the agent.
 
-clearPersistedMcpAuth();
-```
+## OAuth
 
-Use `authSessionKey` on every mounted SDK surface and call `clearPersistedMcpAuth()` during app logout so a later session cannot inherit cached MCP connections from the previous user.
+If an MCP server needs user-scoped OAuth:
 
-## Standalone Popup Auth
+- pass `userIdentity`
+- let Emcy manage the popup flow by default
+- override with `onAuthRequired` only when you need custom host auth UX
 
-If you do not pass `embeddedAuth`, the SDK still uses Emcy-owned popup OAuth for MCP servers that require auth. That keeps the hosted agent flow and public-client embed flow on the same standards-based path.
+## Localhost defaults
 
-If you need to fully replace the built-in popup controller, provide `onAuthRequired`.
-
-## React Components
-
-- `EmcyChat` is the drop-in widget.
-- `EmcyChatProvider` + `useEmcyChatContext` let you build custom UIs.
-- `useEmcyAgent` exposes the lower-level agent hook.
-
-## Localhost Helpers
-
-When `agentServiceUrl` points at localhost, the SDK defaults popup helper URLs to:
+When `serviceUrl` points to localhost, popup helper URLs default to:
 
 - `http://localhost:3100/oauth/callback`
 - `http://localhost:3100/.well-known/oauth-client-metadata.json`
 
-That keeps local consumer apps clean while still exercising the real popup OAuth flow.
+## In one sentence
+
+Use `react-embed` for the fastest hosted widget, and use `react` or `react-native` when the assistant is part of your product.
 
 ## License
 

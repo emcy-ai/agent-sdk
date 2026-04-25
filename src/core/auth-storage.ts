@@ -1,6 +1,6 @@
-import type { EmcyAgentConfig } from './types';
+import type { EmcyAgentConfig, EmcyStorageLike } from './types';
 
-type StorageLike = Pick<Storage, 'key' | 'length' | 'removeItem'>;
+export type PersistedStateStorage = EmcyStorageLike & Pick<Storage, 'key' | 'length'>;
 
 const LEGACY_OAUTH_TOKEN_STORAGE_PREFIX = 'emcy_oauth_';
 const REGISTRATION_STORAGE_PREFIX = 'emcy_oauth_registration_';
@@ -10,12 +10,10 @@ const OAUTH_CALLBACK_STORAGE_PREFIX = 'emcy-oauth-callback:';
 export interface ClearPersistedMcpAuthStateOptions {
   /** Session scope to clear. Ignored when `clearAll` is true. */
   authSessionKey?: string | null;
-  /** @deprecated Use `authSessionKey`. */
-  authStorageScope?: string | null;
   /** Clear all persisted MCP auth state, regardless of scope. */
   clearAll?: boolean;
   /** Test hook for injecting a storage implementation. */
-  storage?: StorageLike | null;
+  storage?: PersistedStateStorage | null;
 }
 
 function hashAuthSessionKey(value: string): string {
@@ -39,12 +37,9 @@ export function normalizeAuthSessionKey(value?: string | null): string | null {
 }
 
 export function resolveExplicitAuthSessionKey(
-  config: Pick<EmcyAgentConfig, 'authSessionKey' | 'authStorageScope'>,
+  config: Pick<EmcyAgentConfig, 'authSessionKey'>,
 ): string | null {
-  return (
-    normalizeAuthSessionKey(config.authSessionKey)
-    ?? normalizeAuthSessionKey(config.authStorageScope)
-  );
+  return normalizeAuthSessionKey(config.authSessionKey);
 }
 
 export function buildScopedOAuthTokenStoragePrefix(authSessionKey?: string | null): string {
@@ -63,7 +58,7 @@ export function buildScopedOAuthTokenStorageKey(
   return `${buildScopedOAuthTokenStoragePrefix(authSessionKey)}${cacheKey}`;
 }
 
-function getStorage(storage?: StorageLike | null): StorageLike | null {
+function getStorage(storage?: PersistedStateStorage | null): PersistedStateStorage | null {
   if (storage) {
     return storage;
   }
@@ -84,7 +79,7 @@ export function clearPersistedMcpAuthState(
   }
 
   const scopedPrefix = buildScopedOAuthTokenStoragePrefix(
-    options.authSessionKey ?? options.authStorageScope,
+    options.authSessionKey,
   );
   const tokenPrefixes = options.clearAll
     ? [LEGACY_OAUTH_TOKEN_STORAGE_PREFIX, SCOPED_OAUTH_TOKEN_STORAGE_PREFIX]

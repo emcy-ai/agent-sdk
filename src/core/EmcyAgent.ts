@@ -3,6 +3,9 @@ import type {
   AgentConfigResponse,
   AuthorizationServerMetadata,
   ChatMessage,
+  ConversationFeedback,
+  ConversationMessagesPage,
+  ClientToolsMap,
   ClientToolParameter,
   EmcyAgentEvent,
   EmcyAgentEventMap,
@@ -15,6 +18,7 @@ import type {
   SseMessageEnd,
   SseMessageStart,
   SseToolCall,
+  SubmitConversationFeedbackRequest,
 } from './types';
 import {
   applyResolvedRegistration,
@@ -140,6 +144,9 @@ export class EmcyAgent {
   private agentConfig: AgentConfigResponse | null = null;
   private conversationId: string | null = null;
   private messages: ChatMessage[] = [];
+  private historyCursor: string | null = null;
+  private hasOlderMessages = false;
+  private isLoadingHistory = false;
   private abortController: AbortController | null = null;
   private isLoading = false;
   private listeners: Map<string, Set<EventHandler<unknown>>> = new Map();
@@ -218,6 +225,10 @@ export class EmcyAgent {
       }
     }
 
+    if (this.config.initialConversationId) {
+      await this.loadConversation(this.config.initialConversationId);
+    }
+
     return this.agentConfig!;
   }
 
@@ -271,6 +282,9 @@ export class EmcyAgent {
   newConversation(): void {
     this.conversationId = null;
     this.messages = [];
+    this.historyCursor = null;
+    this.hasOlderMessages = false;
+    this.isLoadingHistory = false;
   }
 
   /** Cancel the current in-flight request */
@@ -289,12 +303,76 @@ export class EmcyAgent {
     return this.conversationId;
   }
 
+  getHasOlderMessages(): boolean {
+    return this.hasOlderMessages;
+  }
+
+  getIsLoadingHistory(): boolean {
+    return this.isLoadingHistory;
+  }
+
   /** Get the loaded agent config */
   getAgentConfig(): AgentConfigResponse | null {
     return this.agentConfig;
   }
 
-  /** Convert client tools to API schema format */
+  async loadConversation(
+    conversationId: string,
+    pageSize = this.config.conversationHistoryPageSize ?? 50,
+  ): Promise<ConversationMessagesPage> {
+    this.isLoadingHistory = true;
+    try {
+      const page = await this.fetchConversationMessages(conversationId, undefined, pageSize);
+      this.applyConversationPage(page, false);
+      return page;
+    } finally {
+      this.isLoadingHistory = false;
+    }
+  }
+
+  async loadOlderMessages(
+    pageSize = this.config.conversationHistoryPageSize ?? 50,
+  ): Promise<ConversationMessagesPage | null> {
+    if (!this.conversationId || !this.historyCursor || !this.hasOlderMessages) {
+      return null;
+    }
+
+    this.isLoadingHistory = true;
+    try {
+      const page = await this.fetchConversationMessages(this.conversationId, this.historyCursor, pageSize);
+      this.applyConversationPage(page, true);
+      return page;
+    } finally {
+      this.isLoadingHistory = false;
+    }
+  }
+
+  async submitFeedback(input: SubmitConversationFeedbackRequest): Promise<ConversationFeedback> {
+    if (!this.conversationId) {
+      throw new Error('No active conversation to rate.');
+    }
+
+    const token = await this.resolveAuthToken();
+    const response = await fetch(
+      `${this.config.agentServiceUrl}/api/v1/chat/conversations/${encodeURIComponent(this.conversationId)}/feedback`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(input),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await getResponseErrorMessage(response));
+    }
+
+    return (await response.json()) as ConversationFeedback;
+  }
+
+  /** Convert client tools to the API schema format. */
   private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
     if (!this.config.clientTools) return [];
     return Object.entries(this.config.clientTools).map(([name, def]) => ({
@@ -325,6 +403,22 @@ export class EmcyAgent {
   /** Whether a request is currently in flight */
   getIsLoading(): boolean {
     return this.isLoading;
+  }
+
+  /** Update the per-turn app context sent with each chat request. */
+  setAppContext(context: Record<string, unknown> | undefined): void {
+    this.config = {
+      ...this.config,
+      context,
+    };
+  }
+
+  /** Update the client tools exposed to the agent without recreating the session. */
+  setClientTools(clientTools: ClientToolsMap | undefined): void {
+    this.config = {
+      ...this.config,
+      clientTools,
+    };
   }
 
   /**
@@ -391,6 +485,19 @@ export class EmcyAgent {
     return this.config.oauthClientMetadataUrl ?? DEFAULT_OAUTH_CLIENT_METADATA_URL;
   }
 
+  setOnAuthRequired(
+    onAuthRequired: EmcyAgentConfig['onAuthRequired'],
+  ): void {
+    this.config = {
+      ...this.config,
+      onAuthRequired,
+    };
+  }
+
+  private getPersistentStorage() {
+    return this.config.storage ?? null;
+  }
+
   private async resolveOAuthClientRegistration(
     authConfig: McpServerAuthConfig | null | undefined,
   ): Promise<McpServerAuthConfig | null> {
@@ -403,6 +510,7 @@ export class EmcyAgent {
       oauthClientMetadataUrl: this.config.oauthClientMetadataUrl,
       clientName: 'Emcy MCP Client',
       clientUri: 'https://emcy.ai',
+      storage: this.getPersistentStorage(),
     });
 
     return applyResolvedRegistration(authConfig, registration);
@@ -875,7 +983,7 @@ export class EmcyAgent {
 
       if (currentAuthConfig.registrationEndpoint) {
         const cacheKey = buildRegistrationCacheKey(currentAuthConfig, callbackUrl, 'dcr');
-        const storedRegistration = loadStoredRegistration(cacheKey);
+        const storedRegistration = loadStoredRegistration(cacheKey, this.getPersistentStorage());
         if (storedRegistration?.clientId) {
           candidates.push(applyResolvedRegistration(currentAuthConfig, {
             cacheKey,
@@ -911,7 +1019,7 @@ export class EmcyAgent {
     return resolved;
   }
 
-  /** Load OAuth token from memory/localStorage using auth-aware cache keying. */
+  /** Load OAuth token from memory/persistent storage using auth-aware cache keying. */
   private loadOAuthToken(mcpServerUrl: string): {
     accessToken: string;
     refreshToken?: string;
@@ -928,9 +1036,10 @@ export class EmcyAgent {
     }
 
     try {
-      if (typeof localStorage !== 'undefined') {
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
         for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
-          const stored = localStorage.getItem(candidate.storageKey);
+          const stored = storage.getItem(candidate.storageKey);
           if (stored) {
             const data = JSON.parse(stored);
             if (data.accessToken && data.expiresAt) {
@@ -956,7 +1065,7 @@ export class EmcyAgent {
     return token.expiresAt > Date.now() || !!token.refreshToken;
   }
 
-  /** Store OAuth token to memory and localStorage */
+  /** Store OAuth token to memory and persistent storage */
   private storeOAuthToken(mcpServerUrl: string, tokenResponse: OAuthTokenResponse): void {
     const resolvedAuthConfig =
       tokenResponse.resolvedAuthConfig ?? this.getServerAuthConfig(mcpServerUrl);
@@ -971,22 +1080,24 @@ export class EmcyAgent {
     this.oauthTokens.set(storageKey, data);
 
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(storageKey, JSON.stringify(data));
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
+        storage.setItem(storageKey, JSON.stringify(data));
       }
     } catch { /* ignore */ }
   }
 
-  /** Clear OAuth token from memory and localStorage */
+  /** Clear OAuth token from memory and persistent storage */
   private clearOAuthToken(mcpServerUrl: string): void {
     for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
       this.oauthTokens.delete(candidate.storageKey);
     }
 
     try {
-      if (typeof localStorage !== 'undefined') {
+      const storage = this.getPersistentStorage() ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      if (storage) {
         for (const candidate of this.getTokenStorageCandidates(mcpServerUrl)) {
-          localStorage.removeItem(candidate.storageKey);
+          storage.removeItem(candidate.storageKey);
         }
       }
     } catch { /* ignore */ }
@@ -1118,9 +1229,9 @@ export class EmcyAgent {
     if (externalUser) {
       chatBody.externalUser = externalUser;
     }
-    const clientToolsSchemas = this.clientToolsToSchemas();
-    if (clientToolsSchemas.length > 0) {
-      chatBody.clientTools = clientToolsSchemas;
+    const clientToolSchemas = this.clientToolsToSchemas();
+    if (clientToolSchemas.length > 0) {
+      chatBody.clientTools = clientToolSchemas;
     }
     let response = await this.callChatApi(chatBody, 'chat');
 
@@ -1166,10 +1277,12 @@ export class EmcyAgent {
             conversationId: this.conversationId!,
             toolCallId: toolCall.toolCallId,
             result: toolResult,
+            durationMs: duration,
+            context: this.config.context,
           };
-          const clientToolsSchemas = this.clientToolsToSchemas();
-          if (clientToolsSchemas.length > 0) {
-            toolResultBody.clientTools = clientToolsSchemas;
+          const clientToolSchemas = this.clientToolsToSchemas();
+          if (clientToolSchemas.length > 0) {
+            toolResultBody.clientTools = clientToolSchemas;
           }
           response = await this.callChatApi(toolResultBody, 'chat/tool-result');
         } catch (err) {
@@ -1206,10 +1319,12 @@ export class EmcyAgent {
               toolCallId: toolCall.toolCallId,
               result: errorResult,
               isError: true,
+              durationMs: duration,
+              context: this.config.context,
             };
-            const clientToolsSchemas = this.clientToolsToSchemas();
-            if (clientToolsSchemas.length > 0) {
-              toolResultBody.clientTools = clientToolsSchemas;
+            const clientToolSchemas = this.clientToolsToSchemas();
+            if (clientToolSchemas.length > 0) {
+              toolResultBody.clientTools = clientToolSchemas;
             }
             response = await this.callChatApi(toolResultBody, 'chat/tool-result');
           } catch {
@@ -1245,6 +1360,70 @@ export class EmcyAgent {
     }
 
     return response;
+  }
+
+  private async fetchConversationMessages(
+    conversationId: string,
+    cursor?: string,
+    pageSize = 50,
+  ): Promise<ConversationMessagesPage> {
+    const token = await this.resolveAuthToken();
+    const params = new URLSearchParams();
+    params.set('pageSize', String(pageSize));
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+
+    const response = await fetch(
+      `${this.config.agentServiceUrl}/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await getResponseErrorMessage(response));
+    }
+
+    return (await response.json()) as ConversationMessagesPage;
+  }
+
+  private applyConversationPage(
+    page: ConversationMessagesPage,
+    prepend: boolean,
+  ): void {
+    const mappedMessages = page.messages.map((message) => this.mapReplayMessage(message));
+    this.conversationId = page.conversationId;
+    this.historyCursor = page.nextCursor ?? null;
+    this.hasOlderMessages = page.hasNextPage;
+    this.messages = prepend
+      ? [...mappedMessages, ...this.messages]
+      : mappedMessages;
+  }
+
+  private mapReplayMessage(message: ConversationMessagesPage['messages'][number]): ChatMessage {
+    const timestamp = new Date(message.createdAt);
+    return {
+      id: message.id,
+      role: message.role,
+      content: message.content ?? '',
+      toolName: message.toolName ?? undefined,
+      toolLabel: message.toolLabel ?? undefined,
+      toolCallId: message.toolCallId ?? undefined,
+      timestamp,
+      toolCallStatus: message.toolCallStatus ?? undefined,
+      toolCallStartTime:
+        message.toolCallDurationMs != null
+          ? timestamp.getTime() - message.toolCallDurationMs
+          : undefined,
+      toolCallDuration: message.toolCallDurationMs ?? undefined,
+      toolResult: message.toolResultJson ?? undefined,
+      toolError: message.toolError ?? undefined,
+      errorCode: message.errorCode ?? undefined,
+      metadataJson: message.metadataJson ?? null,
+    };
   }
 
   /**
@@ -1321,6 +1500,15 @@ export class EmcyAgent {
 
         case 'error': {
           const data = event.data as SseError;
+          const errorMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'error',
+            content: data.message,
+            timestamp: new Date(),
+            errorCode: data.code,
+          };
+          this.messages.push(errorMsg);
+          this.emit('message', errorMsg);
           this.emit('error', data);
           return { type: 'error', data };
         }

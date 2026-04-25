@@ -1,4 +1,5 @@
 import type {
+  EmcyStorageLike,
   McpClientRegistrationPreference,
   McpResolvedClientMode,
   McpServerAuthConfig,
@@ -8,11 +9,13 @@ import type {
   StoredOAuthRegistration,
 } from '../types';
 
-type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
 const REGISTRATION_STORAGE_PREFIX = 'emcy_oauth_registration_';
 
-function getStorage(): StorageLike | null {
+function getStorage(storage?: EmcyStorageLike | null): EmcyStorageLike | null {
+  if (storage) {
+    return storage;
+  }
+
   try {
     return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
@@ -34,7 +37,16 @@ export function getEffectiveCallbackUrl(
   authConfig: McpServerAuthConfig | null | undefined,
   fallbackCallbackUrl: string,
 ): string {
-  return authConfig?.callbackUrl ?? fallbackCallbackUrl;
+  const configuredCallbackUrl = authConfig?.callbackUrl?.trim();
+  if (!configuredCallbackUrl) {
+    return fallbackCallbackUrl;
+  }
+
+  if (isNativeCallbackUrl(fallbackCallbackUrl) && !isNativeCallbackUrl(configuredCallbackUrl)) {
+    return fallbackCallbackUrl;
+  }
+
+  return configuredCallbackUrl;
 }
 
 export function buildRegistrationCacheKey(
@@ -71,12 +83,15 @@ export function buildTokenCacheKey(
   return encodeCacheKey(raw);
 }
 
-export function loadStoredRegistration(cacheKey: string): StoredOAuthRegistration | null {
-  const storage = getStorage();
-  if (!storage) return null;
+export function loadStoredRegistration(
+  cacheKey: string,
+  storage?: EmcyStorageLike | null,
+): StoredOAuthRegistration | null {
+  const targetStorage = getStorage(storage);
+  if (!targetStorage) return null;
 
   try {
-    const raw = storage.getItem(`${REGISTRATION_STORAGE_PREFIX}${cacheKey}`);
+    const raw = targetStorage.getItem(`${REGISTRATION_STORAGE_PREFIX}${cacheKey}`);
     if (!raw) return null;
     return JSON.parse(raw) as StoredOAuthRegistration;
   } catch {
@@ -84,12 +99,15 @@ export function loadStoredRegistration(cacheKey: string): StoredOAuthRegistratio
   }
 }
 
-export function saveStoredRegistration(registration: StoredOAuthRegistration): void {
-  const storage = getStorage();
-  if (!storage) return;
+export function saveStoredRegistration(
+  registration: StoredOAuthRegistration,
+  storage?: EmcyStorageLike | null,
+): void {
+  const targetStorage = getStorage(storage);
+  if (!targetStorage) return;
 
   try {
-    storage.setItem(
+    targetStorage.setItem(
       `${REGISTRATION_STORAGE_PREFIX}${registration.key}`,
       JSON.stringify(registration),
     );
@@ -98,12 +116,15 @@ export function saveStoredRegistration(registration: StoredOAuthRegistration): v
   }
 }
 
-export function clearStoredRegistration(cacheKey: string): void {
-  const storage = getStorage();
-  if (!storage) return;
+export function clearStoredRegistration(
+  cacheKey: string,
+  storage?: EmcyStorageLike | null,
+): void {
+  const targetStorage = getStorage(storage);
+  if (!targetStorage) return;
 
   try {
-    storage.removeItem(`${REGISTRATION_STORAGE_PREFIX}${cacheKey}`);
+    targetStorage.removeItem(`${REGISTRATION_STORAGE_PREFIX}${cacheKey}`);
   } catch {
     // Ignore storage failures.
   }
@@ -135,6 +156,7 @@ export interface ResolveOAuthRegistrationOptions {
   clientName?: string;
   clientUri?: string;
   fetchImpl?: typeof fetch;
+  storage?: EmcyStorageLike | null;
 }
 
 function createResolvedRegistration(
@@ -168,12 +190,25 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
 }
 
+function isNativeCallbackUrl(callbackUrl: string): boolean {
+  try {
+    const url = new URL(callbackUrl);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch {
+    return !callbackUrl.startsWith('http://') && !callbackUrl.startsWith('https://');
+  }
+}
+
 function inferApplicationType(callbackUrl: string): 'web' | 'native' {
   try {
     const url = new URL(callbackUrl);
-    return isLoopbackHost(url.hostname) ? 'native' : 'web';
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return isLoopbackHost(url.hostname) ? 'native' : 'web';
+    }
+
+    return 'native';
   } catch {
-    return 'web';
+    return 'native';
   }
 }
 
@@ -189,7 +224,7 @@ export async function registerPublicClient(
     throw new Error('Dynamic client registration is not available for this server.');
   }
 
-  const existing = loadStoredRegistration(registration.cacheKey);
+  const existing = loadStoredRegistration(registration.cacheKey, options.storage);
   if (existing?.clientId) {
     return {
       ...registration,
@@ -238,7 +273,7 @@ export async function registerPublicClient(
     resource: authConfig.resource,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-  });
+  }, options.storage);
 
   return {
     ...registration,

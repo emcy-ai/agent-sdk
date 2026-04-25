@@ -13,7 +13,6 @@ export interface ClientToolDefinition {
   description: string;
   parameters: Record<string, ClientToolParameter>;
   execute: (params: Record<string, unknown>) => Promise<unknown>;
-  requireConfirmation?: boolean;
 }
 
 export type ClientToolsMap = Record<string, ClientToolDefinition>;
@@ -41,6 +40,12 @@ export interface EmcyExternalUserContext {
   displayName?: string;
   avatarUrl?: string;
   organizationId?: string;
+}
+
+export interface EmcyStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 export interface EmcyAgentConfig {
@@ -82,12 +87,6 @@ export interface EmcyAgentConfig {
   authSessionKey?: string | null;
 
   /**
-   * @deprecated Use `authSessionKey`.
-   * Older alias for namespacing persisted MCP auth state in browser storage.
-   */
-  authStorageScope?: string | null;
-
-  /**
    * Embedded popup auth settings.
    * Use this to tell Emcy which host-app user is currently signed in so
    * the built-in popup flow can prefer the same downstream account.
@@ -117,10 +116,28 @@ export interface EmcyAgentConfig {
   context?: Record<string, unknown>;
 
   /**
+   * Optional: resume an existing server-side conversation on init.
+   * Use this with persisted conversation ids in the host app.
+   */
+  initialConversationId?: string | null;
+
+  /**
+   * Page size for conversation replay bootstrap and older-message loading.
+   * Default: 50
+   */
+  conversationHistoryPageSize?: number;
+
+  /**
    * Client tools — execute locally in browser, exposed to LLM.
    * The agent can call these to interact with the host app (e.g. fill forms, read page state).
    */
   clientTools?: ClientToolsMap;
+
+  /**
+   * Optional persistent storage override used for MCP auth/session artifacts.
+   * If omitted, the runtime falls back to `localStorage` when available.
+   */
+  storage?: EmcyStorageLike | null;
 }
 
 // ================================================================
@@ -129,7 +146,7 @@ export interface EmcyAgentConfig {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
+  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error';
   content: string;
   toolName?: string;
   toolLabel?: string;
@@ -140,6 +157,57 @@ export interface ChatMessage {
   toolCallDuration?: number;
   toolResult?: string;
   toolError?: string;
+  errorCode?: string;
+  metadataJson?: string | null;
+}
+
+export interface ConversationReplayMessage {
+  id: string;
+  sequenceNumber: number;
+  role: ChatMessage['role'];
+  content?: string | null;
+  createdAt: string;
+  toolName?: string | null;
+  toolLabel?: string | null;
+  toolCallId?: string | null;
+  toolCallStatus?: 'calling' | 'completed' | 'error' | null;
+  toolCallDurationMs?: number | null;
+  toolArgumentsJson?: string | null;
+  toolResultJson?: string | null;
+  toolError?: string | null;
+  errorCode?: string | null;
+  metadataJson?: string | null;
+}
+
+export interface ConversationMessagesPage {
+  conversationId: string;
+  messages: ConversationReplayMessage[];
+  pageSize: number;
+  nextCursor?: string | null;
+  hasNextPage: boolean;
+}
+
+export type ConversationFeedbackSentiment = 'up' | 'down';
+
+export interface SubmitConversationFeedbackRequest {
+  sentiment: ConversationFeedbackSentiment;
+  comment?: string;
+  source?: string;
+  toolCallId?: string;
+  conversationMessageId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConversationFeedback {
+  id: string;
+  conversationId: string;
+  sentiment: ConversationFeedbackSentiment;
+  comment?: string | null;
+  source: string;
+  toolCallId?: string | null;
+  conversationMessageId?: string | null;
+  metadataJson?: string | null;
+  createdAt: string;
 }
 
 // ================================================================
@@ -284,6 +352,7 @@ export interface McpServerInfo {
 export interface AgentConfigResponse {
   agentId: string;
   name: string;
+  conversationResumeVersion: string;
   /** @deprecated Use mcpServers instead */
   mcpServerUrl?: string;
   mcpServers: McpServerInfo[];
