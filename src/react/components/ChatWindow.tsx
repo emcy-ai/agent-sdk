@@ -1,6 +1,5 @@
 import React from 'react';
-import type { ChatMessage } from '../../core/types';
-import type { SseError } from '../../core/types';
+import type { AudioInputState, ChatMessage, SseError } from '../../core/types';
 import { StyleInjector } from './AnimationStyles';
 import { McpServerStatusBar } from './McpServerStatusBar';
 import type { McpServerStatus } from './McpServerStatusBar';
@@ -28,6 +27,11 @@ export interface ChatWindowProps {
   onNewConversation?: () => void;
   onMcpAuthClick?: (serverUrl: string, serverName: string) => void;
   onMcpSignOutClick?: (serverUrl: string, serverName: string) => void;
+  voice?: AudioInputState & {
+    onStart: () => void;
+    onStop: () => void;
+    onCancel: () => void;
+  };
   /** 'floating' = fixed card (default), 'inline' = fill container */
   variant?: 'floating' | 'inline';
 }
@@ -51,6 +55,7 @@ export function ChatWindow({
   onNewConversation,
   onMcpAuthClick,
   onMcpSignOutClick,
+  voice,
   variant = 'floating',
 }: ChatWindowProps) {
   const containerStyle = variant === 'inline' ? styles.chatWindowInline : styles.chatWindow;
@@ -120,6 +125,7 @@ export function ChatWindow({
       <InputArea
         onSend={onSend}
         disabled={isLoading || Boolean(blockingError)}
+        voice={voice}
         placeholder={
           blockingError
             ? 'Embedded agent unavailable'

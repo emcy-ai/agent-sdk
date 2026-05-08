@@ -1,6 +1,7 @@
 import { parseSseStream } from './sse-client';
 import type {
   AgentConfigResponse,
+  AudioInputState,
   AuthorizationServerMetadata,
   ChatMessage,
   ConversationFeedback,
@@ -36,6 +37,14 @@ import {
 type EventHandler<T> = (data: T) => void;
 type BuiltInPopupAuthHandler = {
   __emcyBuiltinPopupAuth?: boolean;
+};
+
+type RealtimeTranscriptionSessionResponse = {
+  sessionId: string;
+  conversationId: string;
+  webSocketUrl: string;
+  expiresInSeconds: number;
+  maxSessionSeconds: number;
 };
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
@@ -110,17 +119,54 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
   return text.trim() || fallback;
 }
 
+function parameterToJsonSchema(parameter: ClientToolParameter): Record<string, unknown> {
+  const schema: Record<string, unknown> = {
+    type: parameter.type,
+  };
+
+  if (parameter.description) {
+    schema.description = parameter.description;
+  }
+
+  if (parameter.enum) {
+    schema.enum = parameter.enum;
+  }
+
+  if (parameter.type === 'array') {
+    schema.items = parameter.items
+      ? parameterToJsonSchema(parameter.items)
+      : { type: 'string' };
+  }
+
+  if (parameter.type === 'object' && parameter.properties) {
+    const properties: Record<string, object> = {};
+    const required: string[] = [];
+
+    for (const [key, child] of Object.entries(parameter.properties)) {
+      properties[key] = parameterToJsonSchema(child);
+      if (child.required) required.push(key);
+    }
+
+    schema.properties = properties;
+    schema.required = required;
+  }
+
+  if (parameter.additionalProperties !== undefined) {
+    schema.additionalProperties =
+      typeof parameter.additionalProperties === 'boolean'
+        ? parameter.additionalProperties
+        : parameterToJsonSchema(parameter.additionalProperties);
+  }
+
+  return schema;
+}
+
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
   const properties: Record<string, object> = {};
   const required: string[] = [];
   for (const [key, p] of Object.entries(params)) {
-    const prop: Record<string, unknown> = {
-      type: p.type,
-      description: p.description,
-    };
-    if (p.enum) prop.enum = p.enum;
-    properties[key] = prop;
+    properties[key] = parameterToJsonSchema(p);
     if (p.required) required.push(key);
   }
   return { type: 'object', properties, required };
@@ -163,6 +209,23 @@ export class EmcyAgent {
   }> = new Map();
   /** Servers explicitly disconnected by the user and awaiting manual re-auth */
   private manuallySignedOutServers: Set<string> = new Set();
+  private audioState: AudioInputState = {
+    status: 'idle',
+    isSupported: false,
+    isEnabled: false,
+    transcript: '',
+    partialTranscript: '',
+    error: null,
+  };
+  private audioStream: MediaStream | null = null;
+  private audioContext: AudioContext | null = null;
+  private audioSource: MediaStreamAudioSourceNode | null = null;
+  private audioProcessor: ScriptProcessorNode | null = null;
+  private audioSilentGain: GainNode | null = null;
+  private audioSocket: WebSocket | null = null;
+  private audioSessionTimer: ReturnType<typeof setTimeout> | null = null;
+  private audioSessionStopRequested = false;
+  private audioFinalTranscript = '';
 
   constructor(config: EmcyAgentConfig) {
     this.config = {
@@ -172,6 +235,7 @@ export class EmcyAgent {
       oauthClientMetadataUrl:
         config.oauthClientMetadataUrl ?? getDefaultOAuthClientMetadataUrl(config.agentServiceUrl),
     };
+    this.audioState = this.buildAudioState({ status: 'idle' });
   }
 
   private async resolveAuthToken(): Promise<string> {
@@ -199,6 +263,8 @@ export class EmcyAgent {
     }
 
     this.agentConfig = await response.json();
+    this.audioState = this.buildAudioState({ status: 'idle' });
+    this.emit('audio_state', this.audioState);
 
     if (this.agentConfig?.mcpServers?.length) {
       await Promise.all(
@@ -316,6 +382,138 @@ export class EmcyAgent {
     return this.agentConfig;
   }
 
+  getAudioInputState(): AudioInputState {
+    return { ...this.audioState };
+  }
+
+  async startVoiceInput(): Promise<void> {
+    if (!this.agentConfig) {
+      await this.init();
+    }
+
+    if (!this.isAudioInputSupported()) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'unsupported_browser',
+          message: 'Microphone input is not supported in this browser.',
+        },
+      });
+      return;
+    }
+
+    if (!this.isAudioInputEnabled()) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'audio_not_enabled',
+          message: 'Microphone input is not enabled for this agent.',
+        },
+      });
+      return;
+    }
+
+    if (
+      this.audioState.status === 'requesting_permission'
+      || this.audioState.status === 'connecting'
+      || this.audioState.status === 'listening'
+      || this.audioState.status === 'transcribing'
+    ) {
+      return;
+    }
+
+    this.audioSessionStopRequested = false;
+    this.audioFinalTranscript = '';
+    this.setAudioState({
+      status: 'requesting_permission',
+      transcript: '',
+      partialTranscript: '',
+      error: null,
+      sessionId: null,
+      conversationId: this.conversationId,
+    });
+
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (error) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'microphone_permission_denied',
+          message: error instanceof Error ? error.message : 'Microphone permission was denied.',
+        },
+      });
+      return;
+    }
+
+    try {
+      this.audioStream = stream;
+      this.setAudioState({ status: 'connecting' });
+
+      const session = await this.createRealtimeTranscriptionSession();
+      this.conversationId = session.conversationId;
+      this.setAudioState({
+        sessionId: session.sessionId,
+        conversationId: session.conversationId,
+        maxSessionSeconds: session.maxSessionSeconds,
+      });
+
+      const socket = await this.openAudioSocket(session.webSocketUrl);
+      this.audioSocket = socket;
+      this.bindAudioSocket(socket);
+      await this.startAudioCapture(stream, socket);
+
+      const maxSessionMs = Math.max(1, session.maxSessionSeconds) * 1000;
+      this.audioSessionTimer = setTimeout(() => {
+        void this.stopVoiceInput();
+      }, maxSessionMs);
+
+      this.setAudioState({ status: 'listening' });
+    } catch (error) {
+      this.cleanupAudioCapture();
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: this.extractErrorCode(error) ?? 'audio_start_failed',
+          message: error instanceof Error ? error.message : 'Could not start microphone input.',
+        },
+      });
+    }
+  }
+
+  async stopVoiceInput(): Promise<void> {
+    this.audioSessionStopRequested = true;
+    this.cleanupAudioCapture(false);
+
+    if (this.audioSocket?.readyState === WebSocket.OPEN) {
+      this.audioSocket.send(JSON.stringify({ type: 'audio.commit' }));
+      this.setAudioState({ status: 'transcribing' });
+      return;
+    }
+
+    this.setAudioState({ status: 'idle' });
+  }
+
+  cancelVoiceInput(): void {
+    this.audioSessionStopRequested = true;
+    this.cleanupAudioCapture();
+    this.setAudioState({
+      status: 'idle',
+      transcript: '',
+      partialTranscript: '',
+      error: null,
+      sessionId: null,
+    });
+  }
+
   async loadConversation(
     conversationId: string,
     pageSize = this.config.conversationHistoryPageSize ?? 50,
@@ -373,12 +571,13 @@ export class EmcyAgent {
   }
 
   /** Convert client tools to the API schema format. */
-  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
+  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object; selection?: unknown }> {
     if (!this.config.clientTools) return [];
     return Object.entries(this.config.clientTools).map(([name, def]) => ({
       name,
       description: def.description,
       inputSchema: parametersToJsonSchema(def.parameters) as object,
+      selection: def.selection,
     }));
   }
 
@@ -492,6 +691,380 @@ export class EmcyAgent {
       ...this.config,
       onAuthRequired,
     };
+  }
+
+  private isAudioInputSupported(): boolean {
+    const audioContextCtor = this.getAudioContextConstructor();
+    return (
+      typeof navigator !== 'undefined'
+      && Boolean(navigator.mediaDevices?.getUserMedia)
+      && typeof WebSocket !== 'undefined'
+      && Boolean(audioContextCtor)
+      && typeof crypto !== 'undefined'
+    );
+  }
+
+  private isAudioInputEnabled(): boolean {
+    const capabilities = this.agentConfig?.modelConfig?.capabilities;
+    return Boolean(
+      this.agentConfig?.audio?.inputEnabled
+      && (capabilities?.audioInput ?? capabilities?.realtimeAudioInput),
+    );
+  }
+
+  private buildAudioState(patch: Partial<AudioInputState>): AudioInputState {
+    return {
+      status: patch.status ?? this.audioState.status,
+      isSupported: this.isAudioInputSupported(),
+      isEnabled: this.isAudioInputEnabled(),
+      transcript: patch.transcript ?? this.audioState.transcript,
+      partialTranscript: patch.partialTranscript ?? this.audioState.partialTranscript,
+      error: patch.error ?? this.audioState.error,
+      sessionId: patch.sessionId ?? this.audioState.sessionId ?? null,
+      conversationId: patch.conversationId ?? this.audioState.conversationId ?? this.conversationId,
+      maxSessionSeconds:
+        patch.maxSessionSeconds
+        ?? this.audioState.maxSessionSeconds
+        ?? this.agentConfig?.audio?.maxSessionSeconds
+        ?? null,
+    };
+  }
+
+  private setAudioState(patch: Partial<AudioInputState>): void {
+    this.audioState = this.buildAudioState(patch);
+    this.emit('audio_state', this.audioState);
+  }
+
+  private getAudioContextConstructor(): typeof AudioContext | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      ?? null;
+  }
+
+  private async createRealtimeTranscriptionSession(): Promise<RealtimeTranscriptionSessionResponse> {
+    const token = await this.resolveAuthToken();
+    const externalUser = this.buildExternalUserContext();
+    const response = await fetch(
+      `${this.config.agentServiceUrl}/api/v1/agents/${encodeURIComponent(this.config.agentId)}/realtime/transcription-sessions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversationId: this.conversationId,
+          externalUserId: this.config.externalUserId,
+          externalUser,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw await this.buildApiError(response);
+    }
+
+    return (await response.json()) as RealtimeTranscriptionSessionResponse;
+  }
+
+  private async buildApiError(response: Response): Promise<Error> {
+    let code: string | null = null;
+    let message: string | null = null;
+
+    try {
+      const payload = await response.clone().json();
+      if (payload && typeof payload === 'object') {
+        const record = payload as Record<string, unknown>;
+        code = typeof record.code === 'string' ? record.code : null;
+        message = extractErrorMessage(payload);
+      }
+    } catch {
+      // Fall back below.
+    }
+
+    const error = new Error(message ?? await getResponseErrorMessage(response));
+    if (code) {
+      (error as Error & { code?: string }).code = code;
+    }
+    return error;
+  }
+
+  private async openAudioSocket(url: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const cleanup = () => {
+        socket.removeEventListener('open', handleOpen);
+        socket.removeEventListener('error', handleError);
+      };
+      const handleOpen = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const handleError = () => {
+        cleanup();
+        reject(new Error('Could not connect to the realtime microphone service.'));
+      };
+
+      socket.addEventListener('open', handleOpen);
+      socket.addEventListener('error', handleError);
+    });
+  }
+
+  private bindAudioSocket(socket: WebSocket): void {
+    socket.addEventListener('message', (event) => {
+      void this.handleAudioSocketMessage(event);
+    });
+
+    socket.addEventListener('close', () => {
+      if (this.audioSocket !== socket) {
+        return;
+      }
+
+      this.audioSocket = null;
+      this.clearAudioSessionTimer();
+      if (
+        this.audioState.status === 'listening'
+        || this.audioState.status === 'transcribing'
+        || this.audioState.status === 'connecting'
+      ) {
+        this.cleanupAudioCapture(false);
+        this.setAudioState({ status: 'idle' });
+      }
+    });
+
+    socket.addEventListener('error', () => {
+      if (this.audioSocket !== socket) {
+        return;
+      }
+
+      this.cleanupAudioCapture();
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'audio_socket_error',
+          message: 'The realtime microphone connection failed.',
+        },
+      });
+    });
+  }
+
+  private async handleAudioSocketMessage(event: MessageEvent): Promise<void> {
+    const raw = typeof event.data === 'string'
+      ? event.data
+      : event.data instanceof Blob
+        ? await event.data.text()
+        : '';
+    if (!raw) {
+      return;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    const type = typeof payload.type === 'string' ? payload.type : '';
+    if (type === 'transcript_delta') {
+      const text = typeof payload.text === 'string' ? payload.text : '';
+      if (!text) {
+        return;
+      }
+
+      this.audioFinalTranscript += text;
+      this.setAudioState({
+        partialTranscript: this.audioFinalTranscript,
+        transcript: this.audioFinalTranscript,
+      });
+      this.emit('audio_transcript_delta', {
+        text,
+        transcript: this.audioFinalTranscript,
+        isFinal: false,
+      });
+      return;
+    }
+
+    if (type === 'transcript_final') {
+      const finalText = (
+        typeof payload.text === 'string' && payload.text.trim()
+          ? payload.text
+          : this.audioFinalTranscript
+      ).trim();
+
+      this.cleanupAudioCapture();
+      if (!finalText) {
+        this.setAudioState({ status: 'idle', transcript: '', partialTranscript: '' });
+        return;
+      }
+
+      this.setAudioState({
+        status: 'sending',
+        transcript: finalText,
+        partialTranscript: '',
+        error: null,
+      });
+      this.emit('audio_transcript_final', {
+        text: finalText,
+        transcript: finalText,
+        conversationId: this.conversationId ?? '',
+      });
+      await this.sendMessage(finalText);
+      this.setAudioState({
+        status: 'idle',
+        transcript: finalText,
+        partialTranscript: '',
+        sessionId: null,
+      });
+      return;
+    }
+
+    if (type === 'error') {
+      const code = typeof payload.code === 'string' ? payload.code : 'audio_error';
+      const message = typeof payload.message === 'string' ? payload.message : 'Microphone input failed.';
+      this.cleanupAudioCapture();
+      this.setAudioState({
+        status: 'error',
+        error: { code, message },
+      });
+    }
+  }
+
+  private async startAudioCapture(stream: MediaStream, socket: WebSocket): Promise<void> {
+    const AudioContextCtor = this.getAudioContextConstructor();
+    if (!AudioContextCtor) {
+      throw new Error('Audio capture is not available in this browser.');
+    }
+
+    const context = new AudioContextCtor();
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const silentGain = context.createGain();
+    silentGain.gain.value = 0;
+
+    processor.onaudioprocess = (event) => {
+      if (
+        this.audioSessionStopRequested
+        || socket.readyState !== WebSocket.OPEN
+        || this.audioState.status !== 'listening'
+      ) {
+        return;
+      }
+
+      const input = event.inputBuffer.getChannelData(0);
+      const resampled = this.resampleToPcm16(input, context.sampleRate, 24000);
+      if (resampled.length === 0) {
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        type: 'audio.append',
+        audio: this.pcm16ToBase64(resampled),
+      }));
+    };
+
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(context.destination);
+
+    this.audioContext = context;
+    this.audioSource = source;
+    this.audioProcessor = processor;
+    this.audioSilentGain = silentGain;
+  }
+
+  private resampleToPcm16(input: Float32Array, inputSampleRate: number, outputSampleRate: number): Int16Array {
+    if (inputSampleRate === outputSampleRate) {
+      return this.floatToPcm16(input);
+    }
+
+    const ratio = inputSampleRate / outputSampleRate;
+    const outputLength = Math.floor(input.length / ratio);
+    const output = new Float32Array(outputLength);
+
+    for (let index = 0; index < outputLength; index += 1) {
+      const inputIndex = index * ratio;
+      const lower = Math.floor(inputIndex);
+      const upper = Math.min(lower + 1, input.length - 1);
+      const weight = inputIndex - lower;
+      output[index] = input[lower] * (1 - weight) + input[upper] * weight;
+    }
+
+    return this.floatToPcm16(output);
+  }
+
+  private floatToPcm16(input: Float32Array): Int16Array {
+    const output = new Int16Array(input.length);
+    for (let index = 0; index < input.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, input[index]));
+      output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return output;
+  }
+
+  private pcm16ToBase64(input: Int16Array): string {
+    const bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, offset + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  }
+
+  private cleanupAudioCapture(closeSocket = true): void {
+    this.clearAudioSessionTimer();
+    this.audioProcessor?.disconnect();
+    this.audioSource?.disconnect();
+    this.audioSilentGain?.disconnect();
+    this.audioProcessor = null;
+    this.audioSource = null;
+    this.audioSilentGain = null;
+
+    if (this.audioContext) {
+      void this.audioContext.close().catch(() => undefined);
+      this.audioContext = null;
+    }
+
+    this.audioStream?.getTracks().forEach((track) => track.stop());
+    this.audioStream = null;
+
+    if (closeSocket && this.audioSocket) {
+      const socket = this.audioSocket;
+      this.audioSocket = null;
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'audio.close' }));
+        socket.close();
+      } else if (socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    }
+  }
+
+  private clearAudioSessionTimer(): void {
+    if (!this.audioSessionTimer) {
+      return;
+    }
+
+    clearTimeout(this.audioSessionTimer);
+    this.audioSessionTimer = null;
+  }
+
+  private extractErrorCode(error: unknown): string | null {
+    if (error && typeof error === 'object' && 'code' in error) {
+      const code = (error as { code?: unknown }).code;
+      return typeof code === 'string' ? code : null;
+    }
+    return null;
   }
 
   private getPersistentStorage() {

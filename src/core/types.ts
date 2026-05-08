@@ -4,18 +4,30 @@
 
 export interface ClientToolParameter {
   type: string;
-  description: string;
+  description?: string;
   required?: boolean;
   enum?: string[];
+  items?: ClientToolParameter;
+  properties?: Record<string, ClientToolParameter>;
+  additionalProperties?: boolean | ClientToolParameter;
 }
 
 export interface ClientToolDefinition {
   description: string;
   parameters: Record<string, ClientToolParameter>;
+  selection?: ClientToolSelection;
   execute: (params: Record<string, unknown>) => Promise<unknown>;
 }
 
 export type ClientToolsMap = Record<string, ClientToolDefinition>;
+
+export interface ClientToolSelection {
+  categories?: string[];
+  alwaysInclude?: boolean;
+  includeWhen?: string[];
+  risk?: 'low' | 'medium' | 'high' | string;
+  serverPreferred?: boolean;
+}
 
 // ================================================================
 // Configuration
@@ -357,6 +369,36 @@ export interface AgentConfigResponse {
   mcpServerUrl?: string;
   mcpServers: McpServerInfo[];
   widgetConfig?: WidgetConfig | null;
+  modelConfig?: AgentPublicModelConfig | null;
+  audio?: AgentPublicAudioConfig | null;
+}
+
+export interface AgentModelCapabilities {
+  textInput?: boolean;
+  textOutput?: boolean;
+  audioInput?: boolean;
+  audioOutput?: boolean;
+  realtime?: boolean;
+  toolCalls?: boolean;
+  text?: boolean;
+  realtimeAudioInput?: boolean;
+  realtimeAudioOutput?: boolean;
+  transcription?: boolean;
+  translation?: boolean;
+}
+
+export interface AgentPublicModelConfig {
+  id: string;
+  provider: string;
+  displayName: string;
+  capabilities: AgentModelCapabilities;
+}
+
+export interface AgentPublicAudioConfig {
+  inputEnabled: boolean;
+  outputEnabled: boolean;
+  maxSessionSeconds: number;
+  transcriptionModel?: string | null;
 }
 
 export interface WidgetConfig {
@@ -401,6 +443,39 @@ export interface SseError {
   message: string;
 }
 
+export type AudioInputStatus =
+  | 'idle'
+  | 'requesting_permission'
+  | 'connecting'
+  | 'listening'
+  | 'transcribing'
+  | 'sending'
+  | 'error';
+
+export interface AudioInputState {
+  status: AudioInputStatus;
+  isSupported: boolean;
+  isEnabled: boolean;
+  transcript: string;
+  partialTranscript: string;
+  error: SseError | null;
+  sessionId?: string | null;
+  conversationId?: string | null;
+  maxSessionSeconds?: number | null;
+}
+
+export interface AudioTranscriptDeltaEvent {
+  text: string;
+  transcript: string;
+  isFinal: false;
+}
+
+export interface AudioTranscriptFinalEvent {
+  text: string;
+  transcript: string;
+  conversationId: string;
+}
+
 // ================================================================
 // Events emitted by EmcyAgent
 // ================================================================
@@ -422,6 +497,9 @@ export type EmcyAgentEventMap = {
   loading: boolean;
   thinking: boolean;
   mcp_auth_status: McpAuthStatusEvent;
+  audio_state: AudioInputState;
+  audio_transcript_delta: AudioTranscriptDeltaEvent;
+  audio_transcript_final: AudioTranscriptFinalEvent;
 };
 
 export type EmcyAgentEvent = keyof EmcyAgentEventMap;

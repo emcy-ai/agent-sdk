@@ -45,6 +45,11 @@ export interface UseAppAgentReturn {
   feedback: AppAgentSnapshot['feedback'] & {
     submit: (input: Omit<SubmitConversationFeedbackRequest, 'source'>) => Promise<unknown>;
   };
+  voice: AppAgentSnapshot['voice'] & {
+    start: () => Promise<void>;
+    stop: () => Promise<void>;
+    cancel: () => void;
+  };
   popupAuthState: OAuthPopupState | null;
   startOrRetryPopupAuth: () => void;
   cancelPopupAuth: () => void;
@@ -148,6 +153,12 @@ export function useAppAgentBinding(
     feedback: {
       ...snapshot.feedback,
       submit: (input) => controller.submitFeedback(input),
+    },
+    voice: {
+      ...snapshot.voice,
+      start: () => controller.startVoiceInput(),
+      stop: () => controller.stopVoiceInput(),
+      cancel: () => controller.cancelVoiceInput(),
     },
     popupAuthState: auth.popupAuthState ?? null,
     startOrRetryPopupAuth: auth.startOrRetryPopupAuth ?? (() => undefined),
