@@ -60,6 +60,58 @@ export interface EmcyStorageLike {
   removeItem(key: string): void;
 }
 
+export interface AudioTurnDetectionConfig {
+  /**
+   * Enables SDK-side end-of-speech detection. Defaults to true.
+   * When enabled, the SDK commits microphone input after the user has spoken
+   * and then paused for `silenceDurationMs`.
+   */
+  enabled?: boolean;
+
+  /**
+   * Whether detected end-of-speech should automatically submit the transcript.
+   * Defaults to true. Set false for push-to-talk/manual-stop experiences.
+   */
+  autoSubmit?: boolean;
+
+  /**
+   * Trailing silence required before the SDK commits audio, in milliseconds.
+   * Defaults to 850ms.
+   */
+  silenceDurationMs?: number;
+
+  /**
+   * Minimum detected speech duration before a turn is considered real speech.
+   * Defaults to 180ms to ignore clicks and short bumps.
+   */
+  minSpeechDurationMs?: number;
+
+  /**
+   * Time to keep listening before speech starts, in milliseconds.
+   * Defaults to 12000ms. Set to 0 to disable.
+   */
+  noSpeechTimeoutMs?: number;
+
+  /**
+   * Absolute RMS threshold from 0 to 1. Defaults to 0.012.
+   * The SDK also adapts to the ambient noise floor.
+   */
+  speechThreshold?: number;
+
+  /**
+   * Multiplier applied to the measured ambient noise floor. Defaults to 2.4.
+   */
+  noiseMultiplier?: number;
+}
+
+export interface EmcyAudioInputConfig {
+  /**
+   * SDK-owned turn detection configuration. Consumer apps can tune it, but
+   * they do not need to implement their own microphone VAD.
+   */
+  turnDetection?: AudioTurnDetectionConfig;
+}
+
 export interface EmcyAgentConfig {
   /** API key for authenticating with the Emcy API */
   apiKey: string;
@@ -126,6 +178,9 @@ export interface EmcyAgentConfig {
 
   /** Optional: additional context sent with each message */
   context?: Record<string, unknown>;
+
+  /** Optional: microphone input behavior. */
+  audioInput?: EmcyAudioInputConfig;
 
   /**
    * Optional: resume an existing server-side conversation on init.
@@ -462,6 +517,11 @@ export interface AudioInputState {
   sessionId?: string | null;
   conversationId?: string | null;
   maxSessionSeconds?: number | null;
+  inputLevel?: number;
+  isSpeaking?: boolean;
+  speechMs?: number;
+  silenceMs?: number;
+  autoSubmitEnabled?: boolean;
 }
 
 export interface AudioTranscriptDeltaEvent {
@@ -474,6 +534,14 @@ export interface AudioTranscriptFinalEvent {
   text: string;
   transcript: string;
   conversationId: string;
+}
+
+export interface AudioActivityEvent {
+  inputLevel: number;
+  noiseFloor: number;
+  isSpeaking: boolean;
+  speechMs: number;
+  silenceMs: number;
 }
 
 // ================================================================
@@ -498,6 +566,7 @@ export type EmcyAgentEventMap = {
   thinking: boolean;
   mcp_auth_status: McpAuthStatusEvent;
   audio_state: AudioInputState;
+  audio_activity: AudioActivityEvent;
   audio_transcript_delta: AudioTranscriptDeltaEvent;
   audio_transcript_final: AudioTranscriptFinalEvent;
 };

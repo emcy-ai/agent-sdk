@@ -141,6 +141,28 @@ await agent.init();
 await agent.sendMessage("Hello");
 ```
 
+### Microphone turn detection
+
+Microphone end-of-speech detection is owned by the SDK for both embedded and
+headless integrations. By default, the SDK listens for real speech, adapts to
+the local noise floor, then commits the utterance after a short trailing pause.
+Apps can tune the behavior without implementing their own VAD:
+
+```ts
+const agent = new EmcyAgent({
+  apiKey: "emcy_sk_xxxx",
+  agentId: "ag_xxxxx",
+  audioInput: {
+    turnDetection: {
+      silenceDurationMs: 850,
+      minSpeechDurationMs: 180,
+      noSpeechTimeoutMs: 12000,
+      autoSubmit: true,
+    },
+  },
+});
+```
+
 ## Core app-agent config
 
 ### `apiKey`

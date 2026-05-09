@@ -33,6 +33,18 @@ function createAgentConfig(authConfig: McpServerAuthConfig): AgentConfigResponse
   };
 }
 
+function createAgentConfigWithAuthStatus(
+  authConfig: McpServerAuthConfig,
+  authStatus: 'connected' | 'needs_auth',
+): AgentConfigResponse {
+  const config = createAgentConfig(authConfig);
+  config.mcpServers[0] = {
+    ...config.mcpServers[0],
+    authStatus,
+  };
+  return config;
+}
+
 describe('EmcyAgent auth behavior', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -92,6 +104,39 @@ describe('EmcyAgent auth behavior', () => {
     expect(authConfig?.resource).toBe(MCP_SERVER_URL);
     expect(authConfig?.clientIdMetadataDocumentSupported).toBe(true);
     expect(authConfig?.resourceParameterSupported).toBe(true);
+  });
+
+  it('preserves server-reported connected status for gateway-backed OAuth servers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json(createAgentConfigWithAuthStatus(
+          {
+            authType: 'oauth2',
+            authorizationEndpoint: 'https://auth.todo.example.com/oauth/authorize',
+            tokenEndpoint: 'https://auth.todo.example.com/oauth/token',
+          },
+          'connected',
+        ));
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'agent_test',
+    });
+
+    await agent.init();
+
+    expect(agent.getMcpServers()).toEqual([{
+      url: MCP_SERVER_URL,
+      name: 'Todo MCP',
+      authStatus: 'connected',
+      canSignOut: true,
+    }]);
   });
 
   it('falls back to OpenID discovery when OAuth authorization metadata is unavailable', async () => {

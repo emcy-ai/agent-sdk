@@ -226,6 +226,7 @@ export class AppAgentController {
   private snapshot: AppAgentSnapshot;
   private started = false;
   private disposed = false;
+  private initializationPromise: Promise<void> | null = null;
   private pendingDisplayText: string | null = null;
 
   constructor(private config: AppAgentConfig) {
@@ -387,7 +388,7 @@ export class AppAgentController {
     this.started = true;
     this.bindLifecycleSignals();
     this.bindRuntimeEvents();
-    void this.initialize();
+    this.initializationPromise = this.initialize();
   }
 
   dispose(): void {
@@ -553,6 +554,7 @@ export class AppAgentController {
   }
 
   async connect(serverUrl: string): Promise<boolean> {
+    await this.ensureInitialized();
     const result = await this.agent.authenticate(serverUrl);
     this.setState((current) => ({
       ...current,
@@ -751,6 +753,15 @@ export class AppAgentController {
         },
       }));
     }
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.state.runtime.agentConfig) {
+      return;
+    }
+
+    this.initializationPromise ??= this.initialize();
+    await this.initializationPromise;
   }
 
   private bindRuntimeEvents(): void {

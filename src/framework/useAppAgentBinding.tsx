@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
 } from 'react';
 import type { McpServerAuthConfig, OAuthTokenResponse, SubmitConversationFeedbackRequest } from '../core/types';
@@ -66,6 +67,7 @@ export function useAppAgentBinding(
   } = {},
 ): UseAppAgentReturn {
   const enabled = options?.enabled ?? true;
+  const disposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const controller = useMemo(() => new AppAgentController({
     ...config,
@@ -86,16 +88,22 @@ export function useAppAgentBinding(
     config.serviceUrl,
     config.storage,
     config.useCookies,
-    config.userIdentity?.avatarUrl,
-    config.userIdentity?.displayName,
-    config.userIdentity?.email,
-    config.userIdentity?.organizationId,
     config.userIdentity?.subject,
     enabled,
   ]);
 
-  useEffect(() => () => {
-    controller.dispose();
+  useEffect(() => {
+    if (disposeTimerRef.current) {
+      clearTimeout(disposeTimerRef.current);
+      disposeTimerRef.current = null;
+    }
+
+    return () => {
+      disposeTimerRef.current = setTimeout(() => {
+        controller.dispose();
+        disposeTimerRef.current = null;
+      }, 0);
+    };
   }, [controller]);
 
   useEffect(() => {
