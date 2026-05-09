@@ -312,6 +312,35 @@ export const sendButtonDisabled: CSSProperties = {
   cursor: 'not-allowed',
 };
 
+export const micButton: CSSProperties = {
+  ...sendButton,
+  backgroundColor: colors.bgTertiary,
+  color: colors.textSecondary,
+  border: `1px solid ${colors.border}`,
+};
+
+export const micButtonActive: CSSProperties = {
+  ...micButton,
+  backgroundColor: colors.errorBg,
+  color: colors.errorText,
+  border: `1px solid ${colors.errorBorder}`,
+};
+
+export const micButtonDisabled: CSSProperties = {
+  ...micButton,
+  opacity: 0.35,
+  cursor: 'not-allowed',
+};
+
+export const transcriptPreview: CSSProperties = {
+  padding: '6px 14px 0',
+  fontSize: '12px',
+  lineHeight: 1.4,
+  color: colors.textSecondary,
+  backgroundColor: colors.bg,
+  minHeight: '22px',
+};
+
 export const poweredBy: CSSProperties = {
   textAlign: 'center',
   padding: '0 12px 8px',

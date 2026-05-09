@@ -78,6 +78,7 @@ function EmcyChatInner({
     conversation,
     composer,
     connections,
+    voice,
     popupAuthState,
     startOrRetryPopupAuth,
     cancelPopupAuth,
@@ -169,6 +170,16 @@ function EmcyChatInner({
           onSend={(message) => {
             void composer.send(message);
           }}
+          voice={{
+            ...voice,
+            onStart: () => {
+              void voice.start();
+            },
+            onStop: () => {
+              void voice.stop();
+            },
+            onCancel: voice.cancel,
+          }}
           onLoadOlderMessages={conversation.loadMore}
           onNewConversation={() => {
             void conversation.reset();
@@ -215,6 +226,16 @@ function EmcyChatInner({
             mcpAuthButtonLabel={mcpAuthButtonLabel}
             onSend={(message) => {
               void composer.send(message);
+            }}
+            voice={{
+              ...voice,
+              onStart: () => {
+                void voice.start();
+              },
+              onStop: () => {
+                void voice.stop();
+              },
+              onCancel: voice.cancel,
             }}
             onLoadOlderMessages={conversation.loadMore}
             onClose={handleClose}

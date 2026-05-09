@@ -1,6 +1,7 @@
 import { EmcyAgent } from '../core/EmcyAgent';
 import type {
   AgentConfigResponse,
+  AudioInputState,
   ChatMessage,
   ConversationFeedback,
   McpServerAuthConfig,
@@ -80,6 +81,7 @@ type AppAgentInternalState = {
     pending: AppAgentInputRequest[];
   };
   feedback: AppAgentFeedbackState;
+  voice: AudioInputState;
 };
 
 export type AppAgentSnapshot = AppAgentSnapshotBase & {
@@ -172,6 +174,44 @@ function mapConnections(agent: EmcyAgent): AppAgentConnection[] {
   }));
 }
 
+function normalizeConnections(connections: AppAgentConnection[] | undefined): AppAgentConnection[] {
+  if (!connections?.length) {
+    return [];
+  }
+
+  const byUrl = new Map<string, AppAgentConnection>();
+  for (const connection of connections) {
+    const url = connection.url?.trim();
+    if (!url) {
+      continue;
+    }
+
+    byUrl.set(url, {
+      ...connection,
+      url,
+      name: connection.name?.trim() || url,
+    });
+  }
+
+  return Array.from(byUrl.values());
+}
+
+function mergeConnections(
+  runtimeConnections: AppAgentConnection[],
+  existingConnections: AppAgentConnection[],
+): AppAgentConnection[] {
+  const byUrl = new Map<string, AppAgentConnection>();
+  for (const connection of existingConnections) {
+    byUrl.set(connection.url, connection);
+  }
+
+  for (const connection of runtimeConnections) {
+    byUrl.set(connection.url, connection);
+  }
+
+  return Array.from(byUrl.values());
+}
+
 export class AppAgentController {
   private readonly listeners = new Set<Listener>();
   private readonly agent: EmcyAgent;
@@ -186,6 +226,7 @@ export class AppAgentController {
   private snapshot: AppAgentSnapshot;
   private started = false;
   private disposed = false;
+  private initializationPromise: Promise<void> | null = null;
   private pendingDisplayText: string | null = null;
 
   constructor(private config: AppAgentConfig) {
@@ -247,7 +288,7 @@ export class AppAgentController {
         issue: null,
       },
       connections: {
-        items: [],
+        items: normalizeConnections(config.initialConnections),
       },
       approvals: {
         pending: [],
@@ -261,6 +302,7 @@ export class AppAgentController {
         lastSubmittedAt: null,
         lastFeedback: null,
       },
+      voice: this.agent.getAudioInputState(),
     };
 
     this.recomputeDerivedState();
@@ -327,6 +369,7 @@ export class AppAgentController {
         pending: this.state.requests.pending,
       },
       feedback: this.state.feedback,
+      voice: this.state.voice,
     };
   }
 
@@ -345,7 +388,7 @@ export class AppAgentController {
     this.started = true;
     this.bindLifecycleSignals();
     this.bindRuntimeEvents();
-    void this.initialize();
+    this.initializationPromise = this.initialize();
   }
 
   dispose(): void {
@@ -364,7 +407,9 @@ export class AppAgentController {
     this.agent.off('loading', this.handleLoading);
     this.agent.off('error', this.handleError);
     this.agent.off('mcp_auth_status', this.handleMcpAuthStatus);
+    this.agent.off('audio_state', this.handleAudioState);
     this.lifecycleUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+    this.agent.cancelVoiceInput();
     this.agent.cancel();
     this.approvalResolvers.clear();
     this.inputResolvers.clear();
@@ -438,6 +483,18 @@ export class AppAgentController {
     this.agent.cancel();
   }
 
+  async startVoiceInput(): Promise<void> {
+    await this.agent.startVoiceInput();
+  }
+
+  async stopVoiceInput(): Promise<void> {
+    await this.agent.stopVoiceInput();
+  }
+
+  cancelVoiceInput(): void {
+    this.agent.cancelVoiceInput();
+  }
+
   async loadMore(): Promise<void> {
     this.setState((current) => ({
       ...current,
@@ -497,11 +554,12 @@ export class AppAgentController {
   }
 
   async connect(serverUrl: string): Promise<boolean> {
+    await this.ensureInitialized();
     const result = await this.agent.authenticate(serverUrl);
     this.setState((current) => ({
       ...current,
       connections: {
-        items: mapConnections(this.agent),
+        items: mergeConnections(mapConnections(this.agent), current.connections.items),
       },
     }));
     return result;
@@ -512,7 +570,7 @@ export class AppAgentController {
     this.setState((current) => ({
       ...current,
       connections: {
-        items: mapConnections(this.agent),
+        items: mergeConnections(mapConnections(this.agent), current.connections.items),
       },
     }));
   }
@@ -624,7 +682,7 @@ export class AppAgentController {
           isReady: true,
         },
         connections: {
-          items: mapConnections(this.agent),
+          items: mergeConnections(mapConnections(this.agent), current.connections.items),
         },
       }));
 
@@ -697,6 +755,15 @@ export class AppAgentController {
     }
   }
 
+  private async ensureInitialized(): Promise<void> {
+    if (this.state.runtime.agentConfig) {
+      return;
+    }
+
+    this.initializationPromise ??= this.initialize();
+    await this.initializationPromise;
+  }
+
   private bindRuntimeEvents(): void {
     this.agent.on('message', this.handleMessage);
     this.agent.on('content_delta', this.handleContentDelta);
@@ -707,6 +774,7 @@ export class AppAgentController {
     this.agent.on('loading', this.handleLoading);
     this.agent.on('error', this.handleError);
     this.agent.on('mcp_auth_status', this.handleMcpAuthStatus);
+    this.agent.on('audio_state', this.handleAudioState);
   }
 
   private readonly handleMessage = (message: ChatMessage): void => {
@@ -879,8 +947,15 @@ export class AppAgentController {
     this.setState((current) => ({
       ...current,
       connections: {
-        items: mapConnections(this.agent),
+        items: mergeConnections(mapConnections(this.agent), current.connections.items),
       },
+    }));
+  };
+
+  private readonly handleAudioState = (voice: AudioInputState): void => {
+    this.setState((current) => ({
+      ...current,
+      voice,
     }));
   };
 
@@ -941,6 +1016,11 @@ export class AppAgentController {
   private buildClientTools(clientTools: AppAgentConfig['clientTools']) {
     const approvalAction = {
       description: 'Ask the host app to approve a multi-step plan before you continue.',
+      selection: {
+        categories: ['approval'],
+        alwaysInclude: true,
+        risk: 'medium',
+      },
       parameters: {
         title: { type: 'string', description: 'Short title for the approval request.', required: true },
         rationale: { type: 'string', description: 'Optional reason for the plan.' },
@@ -981,6 +1061,11 @@ export class AppAgentController {
       },
       [APP_AGENT_INPUT_ACTION]: {
         description: 'Ask the host app for structured user input before you continue.',
+        selection: {
+          categories: ['approval'],
+          alwaysInclude: true,
+          risk: 'medium',
+        },
         parameters: {
           title: { type: 'string', description: 'Short title for the input request.', required: true },
           prompt: { type: 'string', description: 'Optional explainer shown above the fields.' },
@@ -1037,7 +1122,7 @@ export class AppAgentController {
         hasOlderMessages: this.agent.getHasOlderMessages(),
       },
       connections: {
-        items: mapConnections(this.agent),
+        items: mergeConnections(mapConnections(this.agent), current.connections.items),
       },
     }));
     void this.persistResumeRecord();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   McpServerAuthConfig,
   OAuthTokenResponse,
@@ -129,10 +129,15 @@ export function usePopupOAuthController(
   options: UsePopupOAuthControllerOptions,
 ): PopupOAuthControllerState {
   const [popupState, setPopupState] = useState<OAuthPopupViewState | null>(null);
+  const popupStateRef = useRef<OAuthPopupViewState | null>(null);
   const activeRequestRef = useRef<ActivePopupAuthRequest | null>(null);
   const mountedRef = useRef(true);
   const optionsRef = useRef(options);
   const authSessionKeyRef = useRef(normalizeAuthSessionKey(options.appSessionKey));
+
+  useEffect(() => {
+    popupStateRef.current = popupState;
+  }, [popupState]);
 
   useEffect(() => {
     optionsRef.current = options;
@@ -166,12 +171,18 @@ export function usePopupOAuthController(
       return;
     }
 
+    if (!popupStateRef.current && !activeRequestRef.current) {
+      return;
+    }
+
     setPopupState((currentState) => {
       if (!currentState) {
+        popupStateRef.current = null;
         return null;
       }
 
       if (!serverUrl || currentState.serverUrl === serverUrl) {
+        popupStateRef.current = null;
         return null;
       }
 
@@ -776,11 +787,17 @@ export function usePopupOAuthController(
     request.resolve(undefined);
   }, [clearPollTimer, clearStoredCallbackPayload, closePopupWindow]);
 
-  return {
+  return useMemo(() => ({
     popupState,
     requestAuth,
     startOrRetryPopupAuth,
     cancelPopupAuth,
     handleServerAuthStatus,
-  };
+  }), [
+    cancelPopupAuth,
+    handleServerAuthStatus,
+    popupState,
+    requestAuth,
+    startOrRetryPopupAuth,
+  ]);
 }

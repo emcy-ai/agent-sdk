@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
 } from 'react';
 import type { McpServerAuthConfig, OAuthTokenResponse, SubmitConversationFeedbackRequest } from '../core/types';
@@ -45,6 +46,11 @@ export interface UseAppAgentReturn {
   feedback: AppAgentSnapshot['feedback'] & {
     submit: (input: Omit<SubmitConversationFeedbackRequest, 'source'>) => Promise<unknown>;
   };
+  voice: AppAgentSnapshot['voice'] & {
+    start: () => Promise<void>;
+    stop: () => Promise<void>;
+    cancel: () => void;
+  };
   popupAuthState: OAuthPopupState | null;
   startOrRetryPopupAuth: () => void;
   cancelPopupAuth: () => void;
@@ -61,6 +67,7 @@ export function useAppAgentBinding(
   } = {},
 ): UseAppAgentReturn {
   const enabled = options?.enabled ?? true;
+  const disposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const controller = useMemo(() => new AppAgentController({
     ...config,
@@ -81,16 +88,22 @@ export function useAppAgentBinding(
     config.serviceUrl,
     config.storage,
     config.useCookies,
-    config.userIdentity?.avatarUrl,
-    config.userIdentity?.displayName,
-    config.userIdentity?.email,
-    config.userIdentity?.organizationId,
     config.userIdentity?.subject,
     enabled,
   ]);
 
-  useEffect(() => () => {
-    controller.dispose();
+  useEffect(() => {
+    if (disposeTimerRef.current) {
+      clearTimeout(disposeTimerRef.current);
+      disposeTimerRef.current = null;
+    }
+
+    return () => {
+      disposeTimerRef.current = setTimeout(() => {
+        controller.dispose();
+        disposeTimerRef.current = null;
+      }, 0);
+    };
   }, [controller]);
 
   useEffect(() => {
@@ -148,6 +161,12 @@ export function useAppAgentBinding(
     feedback: {
       ...snapshot.feedback,
       submit: (input) => controller.submitFeedback(input),
+    },
+    voice: {
+      ...snapshot.voice,
+      start: () => controller.startVoiceInput(),
+      stop: () => controller.stopVoiceInput(),
+      cancel: () => controller.cancelVoiceInput(),
     },
     popupAuthState: auth.popupAuthState ?? null,
     startOrRetryPopupAuth: auth.startOrRetryPopupAuth ?? (() => undefined),

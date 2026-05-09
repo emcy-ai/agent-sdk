@@ -312,4 +312,109 @@ describe('EmcyAgent chat external user context', () => {
     expect(originalTool).not.toHaveBeenCalled();
     expect(updatedTool).toHaveBeenCalledTimes(1);
   });
+
+  it('serializes array client tool parameters with an item schema', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === 'https://api.emcy.ai/api/v1/agents/agent_test/config') {
+        return Response.json({
+          agentId: 'agent_test',
+          name: 'Chat Agent',
+          mcpServers: [],
+          widgetConfig: null,
+        });
+      }
+
+      if (url === 'https://api.emcy.ai/api/v1/chat') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        expect(body.clientTools).toEqual([
+          {
+            name: 'highlightItems',
+            description: 'Highlight checklist items.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ids: {
+                  type: 'array',
+                  description: 'Checklist item ids.',
+                  items: { type: 'string' },
+                },
+                groups: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      itemIds: {
+                        type: 'array',
+                        items: { type: 'string' },
+                      },
+                    },
+                    required: ['itemIds'],
+                  },
+                },
+              },
+              required: ['ids'],
+            },
+            selection: {
+              categories: ['ui_feedback'],
+              includeWhen: ['highlight'],
+              risk: 'low',
+            },
+          },
+        ]);
+
+        return new Response(
+          'event: message_start\ndata: {"conversationId":"conv_test"}\n\n' +
+            'event: message_end\ndata: {"inputTokens":1,"outputTokens":1,"toolCalls":0}\n\n',
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'agent_test',
+      clientTools: {
+        highlightItems: {
+          description: 'Highlight checklist items.',
+          parameters: {
+            ids: {
+              type: 'array',
+              description: 'Checklist item ids.',
+              required: true,
+            },
+            groups: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  itemIds: {
+                    type: 'array',
+                    required: true,
+                  },
+                },
+              },
+            },
+          },
+          selection: {
+            categories: ['ui_feedback'],
+            includeWhen: ['highlight'],
+            risk: 'low',
+          },
+          execute: vi.fn(),
+        },
+      },
+    });
+
+    await agent.init();
+    await agent.sendMessage('highlight');
+  });
 });

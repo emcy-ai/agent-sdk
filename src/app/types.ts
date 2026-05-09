@@ -1,5 +1,6 @@
 import type {
   AgentConfigResponse,
+  AudioInputState,
   ChatMessage,
   ClientToolsMap as RuntimeClientToolsMap,
   ConversationFeedback,
@@ -112,6 +113,7 @@ export interface AppAgentConfig {
   apiKey: string;
   agentId: string;
   serviceUrl?: string;
+  initialConnections?: AppAgentConnection[];
   oauthCallbackUrl?: string;
   oauthClientMetadataUrl?: string;
   getAuthToken?: () => Promise<string | undefined>;
@@ -164,6 +166,7 @@ export interface AppAgentSnapshotBase {
     pending: AppAgentInputRequest[];
   };
   feedback: AppAgentFeedbackState;
+  voice: AudioInputState;
 }
 
 export const APP_AGENT_APPROVAL_ACTION = 'requestApproval';

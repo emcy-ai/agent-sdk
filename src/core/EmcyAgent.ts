@@ -1,6 +1,8 @@
 import { parseSseStream } from './sse-client';
 import type {
   AgentConfigResponse,
+  AudioInputState,
+  AudioTurnDetectionConfig,
   AuthorizationServerMetadata,
   ChatMessage,
   ConversationFeedback,
@@ -38,10 +40,51 @@ type BuiltInPopupAuthHandler = {
   __emcyBuiltinPopupAuth?: boolean;
 };
 
+type RealtimeTranscriptionSessionResponse = {
+  sessionId: string;
+  conversationId: string;
+  webSocketUrl: string;
+  expiresInSeconds: number;
+  maxSessionSeconds: number;
+};
+
+type ResolvedAudioTurnDetectionConfig = Required<AudioTurnDetectionConfig>;
+
+type AudioFrameActivity = {
+  rms: number;
+  peak: number;
+  inputLevel: number;
+  durationMs: number;
+};
+
+type AudioTurnState = {
+  startedAtMs: number;
+  lastFrameAtMs: number;
+  speechStartedAtMs: number | null;
+  lastSpeechAtMs: number | null;
+  speechMs: number;
+  silenceMs: number;
+  noiseFloor: number;
+  isSpeaking: boolean;
+  autoCommitted: boolean;
+  lastActivityEmitMs: number;
+};
+
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 const DEFAULT_LOCAL_PUBLIC_APP_PORT = '3100';
 const DEFAULT_OAUTH_CALLBACK_URL = 'https://emcy.ai/oauth/callback';
 const DEFAULT_OAUTH_CLIENT_METADATA_URL = 'https://emcy.ai/.well-known/oauth-client-metadata.json';
+const DEFAULT_AUDIO_TURN_DETECTION: ResolvedAudioTurnDetectionConfig = {
+  enabled: true,
+  autoSubmit: true,
+  silenceDurationMs: 850,
+  minSpeechDurationMs: 180,
+  noSpeechTimeoutMs: 12000,
+  speechThreshold: 0.012,
+  noiseMultiplier: 2.4,
+};
+const AUDIO_ACTIVITY_EMIT_INTERVAL_MS = 120;
+const MIN_AUDIO_LEVEL_DELTA_FOR_STATE = 0.03;
 
 function isLocalhostHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
@@ -110,17 +153,54 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
   return text.trim() || fallback;
 }
 
+function parameterToJsonSchema(parameter: ClientToolParameter): Record<string, unknown> {
+  const schema: Record<string, unknown> = {
+    type: parameter.type,
+  };
+
+  if (parameter.description) {
+    schema.description = parameter.description;
+  }
+
+  if (parameter.enum) {
+    schema.enum = parameter.enum;
+  }
+
+  if (parameter.type === 'array') {
+    schema.items = parameter.items
+      ? parameterToJsonSchema(parameter.items)
+      : { type: 'string' };
+  }
+
+  if (parameter.type === 'object' && parameter.properties) {
+    const properties: Record<string, object> = {};
+    const required: string[] = [];
+
+    for (const [key, child] of Object.entries(parameter.properties)) {
+      properties[key] = parameterToJsonSchema(child);
+      if (child.required) required.push(key);
+    }
+
+    schema.properties = properties;
+    schema.required = required;
+  }
+
+  if (parameter.additionalProperties !== undefined) {
+    schema.additionalProperties =
+      typeof parameter.additionalProperties === 'boolean'
+        ? parameter.additionalProperties
+        : parameterToJsonSchema(parameter.additionalProperties);
+  }
+
+  return schema;
+}
+
 /** Convert client tool parameters to JSON Schema for the API */
 function parametersToJsonSchema(params: Record<string, ClientToolParameter>): object {
   const properties: Record<string, object> = {};
   const required: string[] = [];
   for (const [key, p] of Object.entries(params)) {
-    const prop: Record<string, unknown> = {
-      type: p.type,
-      description: p.description,
-    };
-    if (p.enum) prop.enum = p.enum;
-    properties[key] = prop;
+    properties[key] = parameterToJsonSchema(p);
     if (p.required) required.push(key);
   }
   return { type: 'object', properties, required };
@@ -163,6 +243,24 @@ export class EmcyAgent {
   }> = new Map();
   /** Servers explicitly disconnected by the user and awaiting manual re-auth */
   private manuallySignedOutServers: Set<string> = new Set();
+  private audioState: AudioInputState = {
+    status: 'idle',
+    isSupported: false,
+    isEnabled: false,
+    transcript: '',
+    partialTranscript: '',
+    error: null,
+  };
+  private audioStream: MediaStream | null = null;
+  private audioContext: AudioContext | null = null;
+  private audioSource: MediaStreamAudioSourceNode | null = null;
+  private audioProcessor: ScriptProcessorNode | null = null;
+  private audioSilentGain: GainNode | null = null;
+  private audioSocket: WebSocket | null = null;
+  private audioSessionTimer: ReturnType<typeof setTimeout> | null = null;
+  private audioSessionStopRequested = false;
+  private audioFinalTranscript = '';
+  private audioTurnState: AudioTurnState | null = null;
 
   constructor(config: EmcyAgentConfig) {
     this.config = {
@@ -172,6 +270,7 @@ export class EmcyAgent {
       oauthClientMetadataUrl:
         config.oauthClientMetadataUrl ?? getDefaultOAuthClientMetadataUrl(config.agentServiceUrl),
     };
+    this.audioState = this.buildAudioState({ status: 'idle' });
   }
 
   private async resolveAuthToken(): Promise<string> {
@@ -199,6 +298,8 @@ export class EmcyAgent {
     }
 
     this.agentConfig = await response.json();
+    this.audioState = this.buildAudioState({ status: 'idle' });
+    this.emit('audio_state', this.audioState);
 
     if (this.agentConfig?.mcpServers?.length) {
       await Promise.all(
@@ -215,7 +316,9 @@ export class EmcyAgent {
           let authStatus: 'connected' | 'needs_auth';
 
           if (server.authConfig?.authType === 'oauth2') {
-            authStatus = this.hasValidOAuthToken(server.url) ? 'connected' : 'needs_auth';
+            authStatus = server.authStatus === 'connected' || this.hasValidOAuthToken(server.url)
+              ? 'connected'
+              : 'needs_auth';
           } else {
             authStatus = server.authStatus || 'connected';
           }
@@ -316,6 +419,141 @@ export class EmcyAgent {
     return this.agentConfig;
   }
 
+  getAudioInputState(): AudioInputState {
+    return { ...this.audioState };
+  }
+
+  async startVoiceInput(): Promise<void> {
+    if (!this.agentConfig) {
+      await this.init();
+    }
+
+    if (!this.isAudioInputSupported()) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'unsupported_browser',
+          message: 'Microphone input is not supported in this browser.',
+        },
+      });
+      return;
+    }
+
+    if (!this.isAudioInputEnabled()) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'audio_not_enabled',
+          message: 'Microphone input is not enabled for this agent.',
+        },
+      });
+      return;
+    }
+
+    if (
+      this.audioState.status === 'requesting_permission'
+      || this.audioState.status === 'connecting'
+      || this.audioState.status === 'listening'
+      || this.audioState.status === 'transcribing'
+    ) {
+      return;
+    }
+
+    this.audioSessionStopRequested = false;
+    this.audioFinalTranscript = '';
+    this.audioTurnState = null;
+    this.setAudioState({
+      status: 'requesting_permission',
+      transcript: '',
+      partialTranscript: '',
+      error: null,
+      sessionId: null,
+      conversationId: this.conversationId,
+      inputLevel: 0,
+      isSpeaking: false,
+      speechMs: 0,
+      silenceMs: 0,
+      autoSubmitEnabled: this.getAudioTurnDetectionConfig().enabled
+        && this.getAudioTurnDetectionConfig().autoSubmit,
+    });
+
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (error) {
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'microphone_permission_denied',
+          message: error instanceof Error ? error.message : 'Microphone permission was denied.',
+        },
+      });
+      return;
+    }
+
+    try {
+      this.audioStream = stream;
+      this.setAudioState({ status: 'connecting' });
+
+      const session = await this.createRealtimeTranscriptionSession();
+      this.conversationId = session.conversationId;
+      this.setAudioState({
+        sessionId: session.sessionId,
+        conversationId: session.conversationId,
+        maxSessionSeconds: session.maxSessionSeconds,
+      });
+
+      const socket = await this.openAudioSocket(session.webSocketUrl);
+      this.audioSocket = socket;
+      this.bindAudioSocket(socket);
+      await this.startAudioCapture(stream, socket);
+
+      const maxSessionMs = Math.max(1, session.maxSessionSeconds) * 1000;
+      this.audioSessionTimer = setTimeout(() => {
+        void this.commitVoiceInput();
+      }, maxSessionMs);
+
+      this.setAudioState({ status: 'listening' });
+    } catch (error) {
+      this.cleanupAudioCapture();
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: this.extractErrorCode(error) ?? 'audio_start_failed',
+          message: error instanceof Error ? error.message : 'Could not start microphone input.',
+        },
+      });
+    }
+  }
+
+  async stopVoiceInput(): Promise<void> {
+    await this.commitVoiceInput();
+  }
+
+  cancelVoiceInput(): void {
+    this.audioSessionStopRequested = true;
+    this.cleanupAudioCapture();
+    this.audioTurnState = null;
+    this.setAudioState({
+      status: 'idle',
+      transcript: '',
+      partialTranscript: '',
+      error: null,
+      sessionId: null,
+      inputLevel: 0,
+      isSpeaking: false,
+      speechMs: 0,
+      silenceMs: 0,
+    });
+  }
+
   async loadConversation(
     conversationId: string,
     pageSize = this.config.conversationHistoryPageSize ?? 50,
@@ -373,12 +611,13 @@ export class EmcyAgent {
   }
 
   /** Convert client tools to the API schema format. */
-  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object }> {
+  private clientToolsToSchemas(): Array<{ name: string; description: string; inputSchema: object; selection?: unknown }> {
     if (!this.config.clientTools) return [];
     return Object.entries(this.config.clientTools).map(([name, def]) => ({
       name,
       description: def.description,
       inputSchema: parametersToJsonSchema(def.parameters) as object,
+      selection: def.selection,
     }));
   }
 
@@ -492,6 +731,714 @@ export class EmcyAgent {
       ...this.config,
       onAuthRequired,
     };
+  }
+
+  private isAudioInputSupported(): boolean {
+    const audioContextCtor = this.getAudioContextConstructor();
+    return (
+      typeof navigator !== 'undefined'
+      && Boolean(navigator.mediaDevices?.getUserMedia)
+      && typeof WebSocket !== 'undefined'
+      && Boolean(audioContextCtor)
+      && typeof crypto !== 'undefined'
+    );
+  }
+
+  private isAudioInputEnabled(): boolean {
+    const capabilities = this.agentConfig?.modelConfig?.capabilities;
+    return Boolean(
+      this.agentConfig?.audio?.inputEnabled
+      && (capabilities?.audioInput ?? capabilities?.realtimeAudioInput),
+    );
+  }
+
+  private isAudioAutoSubmitEnabled(): boolean {
+    const turnDetection = this.getAudioTurnDetectionConfig();
+    return turnDetection.enabled && turnDetection.autoSubmit;
+  }
+
+  private getAudioTurnDetectionConfig(): ResolvedAudioTurnDetectionConfig {
+    const override = this.config.audioInput?.turnDetection ?? {};
+    return {
+      enabled: override.enabled ?? DEFAULT_AUDIO_TURN_DETECTION.enabled,
+      autoSubmit: override.autoSubmit ?? DEFAULT_AUDIO_TURN_DETECTION.autoSubmit,
+      silenceDurationMs: this.clampNumber(
+        override.silenceDurationMs,
+        250,
+        3000,
+        DEFAULT_AUDIO_TURN_DETECTION.silenceDurationMs,
+      ),
+      minSpeechDurationMs: this.clampNumber(
+        override.minSpeechDurationMs,
+        80,
+        1000,
+        DEFAULT_AUDIO_TURN_DETECTION.minSpeechDurationMs,
+      ),
+      noSpeechTimeoutMs: this.clampNumber(
+        override.noSpeechTimeoutMs,
+        0,
+        60000,
+        DEFAULT_AUDIO_TURN_DETECTION.noSpeechTimeoutMs,
+      ),
+      speechThreshold: this.clampNumber(
+        override.speechThreshold,
+        0.002,
+        0.2,
+        DEFAULT_AUDIO_TURN_DETECTION.speechThreshold,
+      ),
+      noiseMultiplier: this.clampNumber(
+        override.noiseMultiplier,
+        1.2,
+        8,
+        DEFAULT_AUDIO_TURN_DETECTION.noiseMultiplier,
+      ),
+    };
+  }
+
+  private clampNumber(
+    value: number | undefined,
+    min: number,
+    max: number,
+    fallback: number,
+  ): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fallback;
+    }
+    return Math.min(max, Math.max(min, value));
+  }
+
+  private buildAudioState(patch: Partial<AudioInputState>): AudioInputState {
+    const hasPatch = (key: keyof AudioInputState) => Object.prototype.hasOwnProperty.call(patch, key);
+    return {
+      status: patch.status ?? this.audioState.status,
+      isSupported: this.isAudioInputSupported(),
+      isEnabled: this.isAudioInputEnabled(),
+      transcript: patch.transcript ?? this.audioState.transcript,
+      partialTranscript: patch.partialTranscript ?? this.audioState.partialTranscript,
+      error: hasPatch('error') ? patch.error ?? null : this.audioState.error,
+      sessionId: hasPatch('sessionId') ? patch.sessionId ?? null : this.audioState.sessionId ?? null,
+      conversationId: hasPatch('conversationId')
+        ? patch.conversationId ?? null
+        : this.audioState.conversationId ?? this.conversationId,
+      maxSessionSeconds:
+        hasPatch('maxSessionSeconds')
+          ? patch.maxSessionSeconds ?? null
+          : this.audioState.maxSessionSeconds
+            ?? this.agentConfig?.audio?.maxSessionSeconds
+            ?? null,
+      inputLevel: hasPatch('inputLevel') ? patch.inputLevel ?? 0 : this.audioState.inputLevel ?? 0,
+      isSpeaking: hasPatch('isSpeaking') ? patch.isSpeaking ?? false : this.audioState.isSpeaking ?? false,
+      speechMs: hasPatch('speechMs') ? patch.speechMs ?? 0 : this.audioState.speechMs ?? 0,
+      silenceMs: hasPatch('silenceMs') ? patch.silenceMs ?? 0 : this.audioState.silenceMs ?? 0,
+      autoSubmitEnabled: hasPatch('autoSubmitEnabled')
+        ? patch.autoSubmitEnabled ?? false
+        : this.audioState.autoSubmitEnabled ?? this.isAudioAutoSubmitEnabled(),
+    };
+  }
+
+  private setAudioState(patch: Partial<AudioInputState>): void {
+    this.audioState = this.buildAudioState(patch);
+    this.emit('audio_state', this.audioState);
+  }
+
+  private getAudioContextConstructor(): typeof AudioContext | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      ?? null;
+  }
+
+  private async createRealtimeTranscriptionSession(): Promise<RealtimeTranscriptionSessionResponse> {
+    const token = await this.resolveAuthToken();
+    const externalUser = this.buildExternalUserContext();
+    const response = await fetch(
+      `${this.config.agentServiceUrl}/api/v1/agents/${encodeURIComponent(this.config.agentId)}/realtime/transcription-sessions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversationId: this.conversationId,
+          externalUserId: this.config.externalUserId,
+          externalUser,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw await this.buildApiError(response);
+    }
+
+    return (await response.json()) as RealtimeTranscriptionSessionResponse;
+  }
+
+  private async buildApiError(response: Response): Promise<Error> {
+    let code: string | null = null;
+    let message: string | null = null;
+
+    try {
+      const payload = await response.clone().json();
+      if (payload && typeof payload === 'object') {
+        const record = payload as Record<string, unknown>;
+        code = typeof record.code === 'string' ? record.code : null;
+        message = extractErrorMessage(payload);
+      }
+    } catch {
+      // Fall back below.
+    }
+
+    const error = new Error(message ?? await getResponseErrorMessage(response));
+    if (code) {
+      (error as Error & { code?: string }).code = code;
+    }
+    return error;
+  }
+
+  private async openAudioSocket(url: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const cleanup = () => {
+        socket.removeEventListener('open', handleOpen);
+        socket.removeEventListener('error', handleError);
+      };
+      const handleOpen = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const handleError = () => {
+        cleanup();
+        reject(new Error('Could not connect to the realtime microphone service.'));
+      };
+
+      socket.addEventListener('open', handleOpen);
+      socket.addEventListener('error', handleError);
+    });
+  }
+
+  private bindAudioSocket(socket: WebSocket): void {
+    socket.addEventListener('message', (event) => {
+      void this.handleAudioSocketMessage(event);
+    });
+
+    socket.addEventListener('close', () => {
+      if (this.audioSocket !== socket) {
+        return;
+      }
+
+      this.audioSocket = null;
+      this.clearAudioSessionTimer();
+      if (
+        this.audioState.status === 'listening'
+        || this.audioState.status === 'transcribing'
+        || this.audioState.status === 'connecting'
+      ) {
+        this.cleanupAudioCapture(false);
+        this.audioTurnState = null;
+        this.setAudioState({
+          status: 'idle',
+          inputLevel: 0,
+          isSpeaking: false,
+          speechMs: 0,
+          silenceMs: 0,
+        });
+      }
+    });
+
+    socket.addEventListener('error', () => {
+      if (this.audioSocket !== socket) {
+        return;
+      }
+
+      this.cleanupAudioCapture();
+      this.audioTurnState = null;
+      this.setAudioState({
+        status: 'error',
+        error: {
+          code: 'audio_socket_error',
+          message: 'The realtime microphone connection failed.',
+        },
+        inputLevel: 0,
+        isSpeaking: false,
+        speechMs: 0,
+        silenceMs: 0,
+      });
+    });
+  }
+
+  private async handleAudioSocketMessage(event: MessageEvent): Promise<void> {
+    const raw = typeof event.data === 'string'
+      ? event.data
+      : event.data instanceof Blob
+        ? await event.data.text()
+        : '';
+    if (!raw) {
+      return;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    const type = typeof payload.type === 'string' ? payload.type : '';
+    if (type === 'transcript_delta') {
+      const text = typeof payload.text === 'string' ? payload.text : '';
+      if (!text) {
+        return;
+      }
+
+      this.audioFinalTranscript += text;
+      this.setAudioState({
+        partialTranscript: this.audioFinalTranscript,
+        transcript: this.audioFinalTranscript,
+      });
+      this.emit('audio_transcript_delta', {
+        text,
+        transcript: this.audioFinalTranscript,
+        isFinal: false,
+      });
+      return;
+    }
+
+    if (type === 'transcript_final') {
+      const finalText = (
+        typeof payload.text === 'string' && payload.text.trim()
+          ? payload.text
+          : this.audioFinalTranscript
+      ).trim();
+
+      this.cleanupAudioCapture();
+      this.audioTurnState = null;
+      if (!finalText) {
+        this.setAudioState({
+          status: 'idle',
+          transcript: '',
+          partialTranscript: '',
+          inputLevel: 0,
+          isSpeaking: false,
+          speechMs: 0,
+          silenceMs: 0,
+        });
+        return;
+      }
+
+      this.setAudioState({
+        status: 'sending',
+        transcript: finalText,
+        partialTranscript: '',
+        error: null,
+        inputLevel: 0,
+        isSpeaking: false,
+      });
+      this.emit('audio_transcript_final', {
+        text: finalText,
+        transcript: finalText,
+        conversationId: this.conversationId ?? '',
+      });
+      await this.sendMessage(finalText);
+      this.setAudioState({
+        status: 'idle',
+        transcript: finalText,
+        partialTranscript: '',
+        sessionId: null,
+        inputLevel: 0,
+        isSpeaking: false,
+        speechMs: 0,
+        silenceMs: 0,
+      });
+      return;
+    }
+
+    if (type === 'error') {
+      const code = typeof payload.code === 'string' ? payload.code : 'audio_error';
+      const message = typeof payload.message === 'string' ? payload.message : 'Microphone input failed.';
+      this.cleanupAudioCapture();
+      this.audioTurnState = null;
+      this.setAudioState({
+        status: 'error',
+        error: { code, message },
+        inputLevel: 0,
+        isSpeaking: false,
+        speechMs: 0,
+        silenceMs: 0,
+      });
+    }
+  }
+
+  private async commitVoiceInput(): Promise<void> {
+    if (
+      this.audioSessionStopRequested
+      || (
+        this.audioState.status !== 'listening'
+        && this.audioState.status !== 'connecting'
+      )
+    ) {
+      return;
+    }
+
+    this.audioSessionStopRequested = true;
+    this.cleanupAudioCapture(false);
+
+    if (this.audioSocket?.readyState === WebSocket.OPEN) {
+      this.audioSocket.send(JSON.stringify({ type: 'audio.commit' }));
+      this.setAudioState({
+        status: 'transcribing',
+        inputLevel: 0,
+        isSpeaking: false,
+        silenceMs: this.audioTurnState?.silenceMs ?? this.audioState.silenceMs ?? 0,
+        speechMs: this.audioTurnState?.speechMs ?? this.audioState.speechMs ?? 0,
+      });
+      return;
+    }
+
+    this.audioTurnState = null;
+    this.setAudioState({
+      status: 'idle',
+      inputLevel: 0,
+      isSpeaking: false,
+      speechMs: 0,
+      silenceMs: 0,
+    });
+  }
+
+  private stopVoiceInputWithoutTranscript(message: string): void {
+    this.audioSessionStopRequested = true;
+    this.cleanupAudioCapture();
+    this.audioTurnState = null;
+    this.setAudioState({
+      status: 'idle',
+      transcript: '',
+      partialTranscript: '',
+      sessionId: null,
+      inputLevel: 0,
+      isSpeaking: false,
+      speechMs: 0,
+      silenceMs: 0,
+      error: {
+        code: 'no_speech_detected',
+        message,
+      },
+    });
+  }
+
+  private createAudioTurnState(nowMs: number): AudioTurnState {
+    return {
+      startedAtMs: nowMs,
+      lastFrameAtMs: nowMs,
+      speechStartedAtMs: null,
+      lastSpeechAtMs: null,
+      speechMs: 0,
+      silenceMs: 0,
+      noiseFloor: DEFAULT_AUDIO_TURN_DETECTION.speechThreshold / 2,
+      isSpeaking: false,
+      autoCommitted: false,
+      lastActivityEmitMs: 0,
+    };
+  }
+
+  private analyzeAudioFrame(input: Float32Array, durationMs: number): AudioFrameActivity {
+    if (input.length === 0) {
+      return { rms: 0, peak: 0, inputLevel: 0, durationMs };
+    }
+
+    let sumSquares = 0;
+    let peak = 0;
+    for (let index = 0; index < input.length; index += 1) {
+      const sample = input[index];
+      const abs = Math.abs(sample);
+      sumSquares += sample * sample;
+      if (abs > peak) {
+        peak = abs;
+      }
+    }
+
+    const rms = Math.sqrt(sumSquares / input.length);
+    return {
+      rms,
+      peak,
+      inputLevel: Math.min(1, rms * 14),
+      durationMs,
+    };
+  }
+
+  private processAudioTurnActivity(activity: AudioFrameActivity, nowMs: number): void {
+    const config = this.getAudioTurnDetectionConfig();
+    if (!config.enabled) {
+      this.emitAudioActivity(activity, nowMs, false, 0, 0, DEFAULT_AUDIO_TURN_DETECTION.speechThreshold / 2);
+      return;
+    }
+
+    const state = this.audioTurnState ?? this.createAudioTurnState(nowMs);
+    this.audioTurnState = state;
+
+    const frameGapMs = Math.max(1, nowMs - state.lastFrameAtMs);
+    const frameDurationMs = Math.max(activity.durationMs, frameGapMs);
+    state.lastFrameAtMs = nowMs;
+
+    const adaptiveThreshold = Math.max(
+      config.speechThreshold,
+      Math.min(0.08, state.noiseFloor * config.noiseMultiplier),
+    );
+    const peakThreshold = Math.max(adaptiveThreshold * 2.2, config.speechThreshold * 2.5);
+    const speechCandidate = activity.rms >= adaptiveThreshold
+      || (activity.rms >= adaptiveThreshold * 0.72 && activity.peak >= peakThreshold);
+
+    if (speechCandidate) {
+      if (state.speechStartedAtMs === null) {
+        state.speechStartedAtMs = nowMs;
+        state.speechMs = 0;
+      }
+      state.lastSpeechAtMs = nowMs;
+      state.speechMs += frameDurationMs;
+      state.silenceMs = 0;
+      state.isSpeaking = true;
+    } else {
+      state.noiseFloor = this.updateNoiseFloor(state.noiseFloor, activity.rms);
+      state.isSpeaking = false;
+      if (state.lastSpeechAtMs !== null) {
+        state.silenceMs = nowMs - state.lastSpeechAtMs;
+      }
+    }
+
+    if (
+      state.speechStartedAtMs !== null
+      && state.speechMs < config.minSpeechDurationMs
+      && state.silenceMs >= config.silenceDurationMs
+    ) {
+      state.speechStartedAtMs = null;
+      state.lastSpeechAtMs = null;
+      state.speechMs = 0;
+      state.silenceMs = 0;
+    }
+
+    this.emitAudioActivity(
+      activity,
+      nowMs,
+      state.isSpeaking,
+      state.speechMs,
+      state.silenceMs,
+      state.noiseFloor,
+    );
+
+    const noSpeechElapsedMs = nowMs - state.startedAtMs;
+    if (
+      config.noSpeechTimeoutMs > 0
+      && state.speechStartedAtMs === null
+      && noSpeechElapsedMs >= config.noSpeechTimeoutMs
+      && !state.autoCommitted
+    ) {
+      state.autoCommitted = true;
+      this.stopVoiceInputWithoutTranscript('No speech was detected. Try again when you are ready to speak.');
+      return;
+    }
+
+    if (
+      config.autoSubmit
+      && state.speechStartedAtMs !== null
+      && state.speechMs >= config.minSpeechDurationMs
+      && state.silenceMs >= config.silenceDurationMs
+      && !state.autoCommitted
+    ) {
+      state.autoCommitted = true;
+      void this.commitVoiceInput();
+    }
+  }
+
+  private updateNoiseFloor(currentNoiseFloor: number, rms: number): number {
+    const sample = Math.max(0.0015, Math.min(0.08, rms));
+    const smoothing = sample > currentNoiseFloor ? 0.02 : 0.12;
+    return currentNoiseFloor * (1 - smoothing) + sample * smoothing;
+  }
+
+  private emitAudioActivity(
+    activity: AudioFrameActivity,
+    nowMs: number,
+    isSpeaking: boolean,
+    speechMs: number,
+    silenceMs: number,
+    noiseFloor: number,
+  ): void {
+    const state = this.audioTurnState;
+    const shouldEmitState = !state
+      || nowMs - state.lastActivityEmitMs >= AUDIO_ACTIVITY_EMIT_INTERVAL_MS
+      || isSpeaking !== this.audioState.isSpeaking
+      || Math.abs(activity.inputLevel - (this.audioState.inputLevel ?? 0)) >= MIN_AUDIO_LEVEL_DELTA_FOR_STATE;
+
+    if (!shouldEmitState) {
+      return;
+    }
+
+    if (state) {
+      state.lastActivityEmitMs = nowMs;
+    }
+
+    const roundedLevel = Number(activity.inputLevel.toFixed(3));
+    const roundedNoiseFloor = Number(noiseFloor.toFixed(5));
+    this.setAudioState({
+      inputLevel: roundedLevel,
+      isSpeaking,
+      speechMs: Math.round(speechMs),
+      silenceMs: Math.round(silenceMs),
+      autoSubmitEnabled: this.isAudioAutoSubmitEnabled(),
+    });
+    this.emit('audio_activity', {
+      inputLevel: roundedLevel,
+      noiseFloor: roundedNoiseFloor,
+      isSpeaking,
+      speechMs: Math.round(speechMs),
+      silenceMs: Math.round(silenceMs),
+    });
+  }
+
+  private async startAudioCapture(stream: MediaStream, socket: WebSocket): Promise<void> {
+    const AudioContextCtor = this.getAudioContextConstructor();
+    if (!AudioContextCtor) {
+      throw new Error('Audio capture is not available in this browser.');
+    }
+
+    const context = new AudioContextCtor();
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const silentGain = context.createGain();
+    silentGain.gain.value = 0;
+    this.audioTurnState = this.createAudioTurnState(performance.now());
+
+    processor.onaudioprocess = (event) => {
+      if (
+        this.audioSessionStopRequested
+        || socket.readyState !== WebSocket.OPEN
+        || this.audioState.status !== 'listening'
+      ) {
+        return;
+      }
+
+      const input = event.inputBuffer.getChannelData(0);
+      const durationMs = (input.length / context.sampleRate) * 1000;
+      this.processAudioTurnActivity(
+        this.analyzeAudioFrame(input, durationMs),
+        performance.now(),
+      );
+
+      if (this.audioSessionStopRequested) {
+        return;
+      }
+
+      const resampled = this.resampleToPcm16(input, context.sampleRate, 24000);
+      if (resampled.length === 0) {
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        type: 'audio.append',
+        audio: this.pcm16ToBase64(resampled),
+      }));
+    };
+
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(context.destination);
+
+    this.audioContext = context;
+    this.audioSource = source;
+    this.audioProcessor = processor;
+    this.audioSilentGain = silentGain;
+  }
+
+  private resampleToPcm16(input: Float32Array, inputSampleRate: number, outputSampleRate: number): Int16Array {
+    if (inputSampleRate === outputSampleRate) {
+      return this.floatToPcm16(input);
+    }
+
+    const ratio = inputSampleRate / outputSampleRate;
+    const outputLength = Math.floor(input.length / ratio);
+    const output = new Float32Array(outputLength);
+
+    for (let index = 0; index < outputLength; index += 1) {
+      const inputIndex = index * ratio;
+      const lower = Math.floor(inputIndex);
+      const upper = Math.min(lower + 1, input.length - 1);
+      const weight = inputIndex - lower;
+      output[index] = input[lower] * (1 - weight) + input[upper] * weight;
+    }
+
+    return this.floatToPcm16(output);
+  }
+
+  private floatToPcm16(input: Float32Array): Int16Array {
+    const output = new Int16Array(input.length);
+    for (let index = 0; index < input.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, input[index]));
+      output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return output;
+  }
+
+  private pcm16ToBase64(input: Int16Array): string {
+    const bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, offset + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  }
+
+  private cleanupAudioCapture(closeSocket = true): void {
+    this.clearAudioSessionTimer();
+    this.audioProcessor?.disconnect();
+    this.audioSource?.disconnect();
+    this.audioSilentGain?.disconnect();
+    this.audioProcessor = null;
+    this.audioSource = null;
+    this.audioSilentGain = null;
+
+    if (this.audioContext) {
+      void this.audioContext.close().catch(() => undefined);
+      this.audioContext = null;
+    }
+
+    this.audioStream?.getTracks().forEach((track) => track.stop());
+    this.audioStream = null;
+
+    if (closeSocket && this.audioSocket) {
+      const socket = this.audioSocket;
+      this.audioSocket = null;
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'audio.close' }));
+        socket.close();
+      } else if (socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    }
+  }
+
+  private clearAudioSessionTimer(): void {
+    if (!this.audioSessionTimer) {
+      return;
+    }
+
+    clearTimeout(this.audioSessionTimer);
+    this.audioSessionTimer = null;
+  }
+
+  private extractErrorCode(error: unknown): string | null {
+    if (error && typeof error === 'object' && 'code' in error) {
+      const code = (error as { code?: unknown }).code;
+      return typeof code === 'string' ? code : null;
+    }
+    return null;
   }
 
   private getPersistentStorage() {
