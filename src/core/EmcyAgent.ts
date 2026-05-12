@@ -901,7 +901,7 @@ export class EmcyAgent {
 
   private async openAudioSocket(url: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
+      const socket = new WebSocket(this.normalizeAudioSocketUrl(url));
       const cleanup = () => {
         socket.removeEventListener('open', handleOpen);
         socket.removeEventListener('error', handleError);
@@ -918,6 +918,23 @@ export class EmcyAgent {
       socket.addEventListener('open', handleOpen);
       socket.addEventListener('error', handleError);
     });
+  }
+
+  private normalizeAudioSocketUrl(url: string): string {
+    if (typeof window === 'undefined') {
+      return url;
+    }
+
+    try {
+      const parsed = new URL(url, window.location.href);
+      if (window.location.protocol === 'https:' && parsed.protocol === 'ws:') {
+        parsed.protocol = 'wss:';
+      }
+
+      return parsed.toString();
+    } catch {
+      return url;
+    }
   }
 
   private bindAudioSocket(socket: WebSocket): void {

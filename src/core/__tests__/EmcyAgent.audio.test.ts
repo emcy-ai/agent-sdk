@@ -100,6 +100,53 @@ describe('EmcyAgent audio input', () => {
     expect(sendSpy).toHaveBeenCalledWith('add a checklist item for renewing the permit');
   });
 
+  it('upgrades audio websocket URLs when the host page is HTTPS', async () => {
+    const openedUrls: string[] = [];
+    class TestWebSocket {
+      static OPEN = 1;
+      static CONNECTING = 0;
+
+      private listeners = new Map<string, Set<() => void>>();
+
+      constructor(url: string) {
+        openedUrls.push(url);
+        queueMicrotask(() => {
+          this.listeners.get('open')?.forEach((listener) => listener());
+        });
+      }
+
+      addEventListener(type: string, listener: () => void) {
+        const listeners = this.listeners.get(type) ?? new Set<() => void>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: () => void) {
+        this.listeners.get(type)?.delete(listener);
+      }
+    }
+
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'https:',
+        href: 'https://pr-44.preview.checklistsquad.com/app',
+      },
+    });
+    vi.stubGlobal('WebSocket', TestWebSocket);
+    const agent = new EmcyAgent({
+      apiKey: 'emcy-test-key',
+      agentId: 'agent_audio',
+    });
+
+    await (agent as unknown as {
+      openAudioSocket(url: string): Promise<WebSocket>;
+    }).openAudioSocket('ws://pr-44.preview.mcpstack.com/api/v1/agents/agent_audio/audio?token=test');
+
+    expect(openedUrls).toEqual([
+      'wss://pr-44.preview.mcpstack.com/api/v1/agents/agent_audio/audio?token=test',
+    ]);
+  });
+
   it('auto-commits microphone input after real speech followed by trailing silence', () => {
     vi.stubGlobal('WebSocket', { OPEN: 1, CONNECTING: 0 });
     const agent = new EmcyAgent({
