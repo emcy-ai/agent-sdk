@@ -691,8 +691,16 @@ export class EmcyAgent {
         return false;
       }
 
-      await this.initMcpSession(mcpServerUrl);
-      return true;
+      // Reflect OAuth success in the UI immediately; MCP session init can follow asynchronously.
+      this.updateMcpAuthStatus(mcpServerUrl, 'connected');
+
+      try {
+        await this.initMcpSession(mcpServerUrl);
+        return true;
+      } catch {
+        // Keep the connected badge when we already have a valid OAuth token.
+        return true;
+      }
     } catch {
       if (wasManuallySignedOut) {
         this.manuallySignedOutServers.add(mcpServerUrl);
